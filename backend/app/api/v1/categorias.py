@@ -1,0 +1,96 @@
+"""Categorías de producto — CRUD.
+
+Reads are gated by the menu permission (`menu:productos.categorias`); writes by
+the stronger action permission (`categoria:gestionar`). OWNER bypasses both in
+code. Every query runs on the RLS-scoped session from `get_tenant_db`.
+"""
+from __future__ import annotations
+
+from typing import Optional
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, Query, status
+from sqlalchemy import func
+from sqlalchemy.orm import Session
+
+from ...core.rbac import AuthContext, get_tenant_db, require_permission
+from ...models import CategoriaProducto
+from ...schemas.categoria import CategoriaCreate, CategoriaOut, CategoriaUpdate
+from ...schemas.common import Page
+from ._helpers import flush_or_conflict, get_or_404, paginate
+
+router = APIRouter(prefix="/categorias", tags=["categorías"])
+
+_READ = "menu:productos.categorias"
+_WRITE = "categoria:gestionar"
+_DUP = "Ya existe una categoría con ese código"
+
+
+@router.get("", response_model=Page[CategoriaOut])
+def list_categorias(
+    q: Optional[str] = Query(default=None, max_length=100),
+    activo: Optional[bool] = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    query = db.query(CategoriaProducto).filter(CategoriaProducto.deleted_at.is_(None))
+    if q:
+        like = f"%{q}%"
+        query = query.filter(
+            CategoriaProducto.nombre.ilike(like) | CategoriaProducto.codigo.ilike(like)
+        )
+    if activo is not None:
+        query = query.filter(CategoriaProducto.activo.is_(activo))
+    query = query.order_by(CategoriaProducto.orden.asc(), CategoriaProducto.codigo.asc())
+    return paginate(query, CategoriaOut, limit, offset)
+
+
+@router.post("", response_model=CategoriaOut, status_code=status.HTTP_201_CREATED)
+def create_categoria(
+    payload: CategoriaCreate,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    obj = CategoriaProducto(**payload.model_dump(), tenant_id=ctx.tenant_id)
+    db.add(obj)
+    flush_or_conflict(db, detail=_DUP)
+    db.refresh(obj)
+    return obj
+
+
+@router.get("/{categoria_id}", response_model=CategoriaOut)
+def get_categoria(
+    categoria_id: UUID,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    return get_or_404(db, CategoriaProducto, categoria_id)
+
+
+@router.patch("/{categoria_id}", response_model=CategoriaOut)
+def update_categoria(
+    categoria_id: UUID,
+    payload: CategoriaUpdate,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    obj = get_or_404(db, CategoriaProducto, categoria_id)
+    for key, value in payload.model_dump(exclude_unset=True).items():
+        setattr(obj, key, value)
+    flush_or_conflict(db, detail=_DUP)
+    db.refresh(obj)
+    return obj
+
+
+@router.delete("/{categoria_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_categoria(
+    categoria_id: UUID,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    obj = get_or_404(db, CategoriaProducto, categoria_id)
+    obj.deleted_at = func.now()
+    db.flush()
+    return None

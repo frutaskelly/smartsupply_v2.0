@@ -1,7 +1,12 @@
 """SQLAlchemy models. Importing this package registers every table on
 `Base.metadata` so Alembic autogenerate and metadata reflection see them.
 """
+from .categoria import CategoriaProducto
+from .cliente import Cliente
+from .esquema_impuesto import EsquemaImpuesto
 from .permission import Permission
+from .precio import ListaPrecios, Precio
+from .producto import Producto
 from .role import Role
 from .role_permission import RolePermission
 from .tenant import Membership, Tenant, User
@@ -13,4 +18,11 @@ __all__ = [
     "Role",
     "Permission",
     "RolePermission",
+    # ── Phase 3: catálogo ──
+    "CategoriaProducto",
+    "EsquemaImpuesto",
+    "Producto",
+    "ListaPrecios",
+    "Precio",
+    "Cliente",
 ]

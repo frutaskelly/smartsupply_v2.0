@@ -7,7 +7,14 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from . import __version__
 from .core.config import settings
-from .api.v1 import auth
+from .api.v1 import (
+    auth,
+    categorias,
+    clientes,
+    esquemas_impuesto,
+    listas_precios,
+    productos,
+)
 
 logging.basicConfig(level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO))
 log = logging.getLogger(__name__)
@@ -54,3 +61,9 @@ def api_root() -> dict:
 
 # ─── API v1 routers ───────────────────────────────────────────────────────────
 app.include_router(auth.router, prefix="/api/v1")
+# Phase 3 — catálogo / master data
+app.include_router(categorias.router, prefix="/api/v1")
+app.include_router(esquemas_impuesto.router, prefix="/api/v1")
+app.include_router(productos.router, prefix="/api/v1")
+app.include_router(listas_precios.router, prefix="/api/v1")
+app.include_router(clientes.router, prefix="/api/v1")

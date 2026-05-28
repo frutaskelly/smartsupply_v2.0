@@ -1,0 +1,99 @@
+"""Esquemas de impuesto — CRUD.
+
+Reusable IVA/IEPS/retención bundles a product can point at. Reads gated by
+`menu:esquemas_impuesto`; writes by `esquema_impuesto:gestionar`.
+"""
+from __future__ import annotations
+
+from typing import Optional
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, Query, status
+from sqlalchemy import func
+from sqlalchemy.orm import Session
+
+from ...core.rbac import AuthContext, get_tenant_db, require_permission
+from ...models import EsquemaImpuesto
+from ...schemas.esquema_impuesto import (
+    EsquemaImpuestoCreate,
+    EsquemaImpuestoOut,
+    EsquemaImpuestoUpdate,
+)
+from ...schemas.common import Page
+from ._helpers import flush_or_conflict, get_or_404, paginate
+
+router = APIRouter(prefix="/esquemas-impuesto", tags=["esquemas de impuesto"])
+
+_READ = "menu:esquemas_impuesto"
+_WRITE = "esquema_impuesto:gestionar"
+_DUP = "Ya existe un esquema de impuesto con ese código"
+
+
+@router.get("", response_model=Page[EsquemaImpuestoOut])
+def list_esquemas(
+    q: Optional[str] = Query(default=None, max_length=120),
+    activo: Optional[bool] = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    query = db.query(EsquemaImpuesto).filter(EsquemaImpuesto.deleted_at.is_(None))
+    if q:
+        like = f"%{q}%"
+        query = query.filter(
+            EsquemaImpuesto.nombre.ilike(like) | EsquemaImpuesto.codigo.ilike(like)
+        )
+    if activo is not None:
+        query = query.filter(EsquemaImpuesto.activo.is_(activo))
+    query = query.order_by(EsquemaImpuesto.codigo.asc())
+    return paginate(query, EsquemaImpuestoOut, limit, offset)
+
+
+@router.post("", response_model=EsquemaImpuestoOut, status_code=status.HTTP_201_CREATED)
+def create_esquema(
+    payload: EsquemaImpuestoCreate,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    obj = EsquemaImpuesto(**payload.model_dump(), tenant_id=ctx.tenant_id)
+    db.add(obj)
+    flush_or_conflict(db, detail=_DUP)
+    db.refresh(obj)
+    return obj
+
+
+@router.get("/{esquema_id}", response_model=EsquemaImpuestoOut)
+def get_esquema(
+    esquema_id: UUID,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    return get_or_404(db, EsquemaImpuesto, esquema_id)
+
+
+@router.patch("/{esquema_id}", response_model=EsquemaImpuestoOut)
+def update_esquema(
+    esquema_id: UUID,
+    payload: EsquemaImpuestoUpdate,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    obj = get_or_404(db, EsquemaImpuesto, esquema_id)
+    for key, value in payload.model_dump(exclude_unset=True).items():
+        setattr(obj, key, value)
+    flush_or_conflict(db, detail=_DUP)
+    db.refresh(obj)
+    return obj
+
+
+@router.delete("/{esquema_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_esquema(
+    esquema_id: UUID,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    obj = get_or_404(db, EsquemaImpuesto, esquema_id)
+    obj.deleted_at = func.now()
+    db.flush()
+    return None
