@@ -1,0 +1,56 @@
+"""SmartSupply v2.0 — FastAPI entry point."""
+import logging
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from . import __version__
+from .core.config import settings
+from .api.v1 import auth
+
+logging.basicConfig(level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO))
+log = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    log.info(
+        "SmartSupply v2.0 starting — env=%s, origins=%s",
+        settings.ENVIRONMENT,
+        settings.allowed_origins_list(),
+    )
+    yield
+    log.info("Shutting down")
+
+
+app = FastAPI(
+    title="SmartSupply v2.0",
+    version=__version__,
+    description="Plataforma SaaS multi-tenant — cadena de suministro gobierno-alimentos.",
+    lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.allowed_origins_list(),
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+    expose_headers=["X-Request-Id", "X-Total-Count"],
+    max_age=3600,
+)
+
+
+@app.get("/health", tags=["meta"])
+def health() -> dict:
+    return {"status": "ok", "version": __version__, "env": settings.ENVIRONMENT}
+
+
+@app.get("/api", tags=["meta"])
+def api_root() -> dict:
+    return {"service": "smartsupply-v2", "docs": "/docs", "health": "/health"}
+
+
+# ─── API v1 routers ───────────────────────────────────────────────────────────
+app.include_router(auth.router, prefix="/api/v1")

@@ -1,0 +1,101 @@
+# SmartSupply v2.0 — local dev stack.
+# Ports are offset from v1 so both stacks can run side by side:
+#   v1 → pg 5432, redis 6379, backend 8001, frontend 3002
+#   v2 → pg 5434, redis 6380, backend 8011, frontend 3012
+#        (5433 is taken by a native postgres on this host)
+name: smartsupplyv2
+
+services:
+  # ─── PostgreSQL (local dev DB; cloud = Supabase) ───────────────────────────
+  postgres:
+    image: postgres:17-alpine
+    container_name: smartsupplyv2_postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: smartsupply_v2
+      POSTGRES_INITDB_ARGS: "-c timezone=UTC"
+    ports:
+      - "5434:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d smartsupply_v2"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ssv2
+
+  # ─── Redis (cache / rate-limit / pub-sub for POS realtime) ─────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: smartsupplyv2_redis
+    ports:
+      - "6380:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ssv2
+
+  # ─── Backend (FastAPI) ──────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: smartsupplyv2_backend
+    env_file:
+      - .env
+    environment:
+      # Override host-facing values for the in-network service names.
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/smartsupply_v2
+      DATABASE_URL_ASYNC: postgresql+asyncpg://postgres:postgres@postgres:5432/smartsupply_v2
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8011:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    networks:
+      - ssv2
+
+  # ─── Frontend (Next.js) ────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # NEXT_PUBLIC_* are baked at BUILD time.
+        NEXT_PUBLIC_API_URL: http://localhost:8011
+        NEXT_PUBLIC_SUPABASE_URL: https://qwffsaxoeehwwdzaytqb.supabase.co
+        NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_tgJ_GhSa9ZtHvysc-HPH1g_4V1bjKDb
+    container_name: smartsupplyv2_frontend
+    environment:
+      NODE_ENV: production
+    ports:
+      - "3012:3000"
+    depends_on:
+      - backend
+    networks:
+      - ssv2
+
+volumes:
+  pgdata:
+    driver: local
+  redisdata:
+    driver: local
+
+networks:
+  ssv2:
+    driver: bridge
+    name: smartsupplyv2_network

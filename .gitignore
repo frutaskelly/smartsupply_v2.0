@@ -1,0 +1,44 @@
+# ─── Secrets / env ──────────────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+cloudflared-config/
+.frutaskelly_secrets.key
+
+# ─── Python ─────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# ─── Node / Next.js ─────────────────────────────────────────────────────────
+node_modules/
+.next/
+out/
+dist/
+build/
+*.tsbuildinfo
+.eslintcache
+next-env.d.ts
+
+# ─── Postgres / data volumes ──────────────────────────────────────────────────
+pgdata/
+*.dump
+*.sql.bak
+
+# ─── Editor / OS ──────────────────────────────────────────────────────────────
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.bak
+*.log
