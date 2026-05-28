@@ -17,6 +17,7 @@ os.environ.setdefault(
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
+from sqlalchemy import text  # noqa: E402
 
 from app.main import app  # noqa: E402
 
@@ -24,3 +25,23 @@ from app.main import app  # noqa: E402
 @pytest.fixture(scope="session")
 def client() -> TestClient:
     return TestClient(app)
+
+
+@pytest.fixture(scope="session")
+def db_engine():
+    """The app engine, but only if a live database is reachable.
+
+    DB-backed tests (RLS, RBAC) require `alembic upgrade head` to have run.
+    When no DB is available (e.g. a bare local run pointed at a stub URL),
+    these tests skip instead of erroring.
+    """
+    from app.core.db import engine
+
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+            # Confirm the schema is migrated, not just reachable.
+            conn.execute(text("SELECT 1 FROM permissions LIMIT 1"))
+    except Exception as exc:  # pragma: no cover - environment dependent
+        pytest.skip(f"No migrated database available: {exc}")
+    return engine
