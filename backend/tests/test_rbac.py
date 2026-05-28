@@ -120,3 +120,81 @@ def test_tenant_selector_must_match_a_membership(seeded):
             x_tenant_id=other_tenant,
         )
     assert exc.value.status_code == 403
+
+
+# ─── first-login linking by email (operator-provisioned accounts) ────────────
+def _provision_unlinked_user(db, email: str):
+    """A tenant + an ADMIN user provisioned but never logged in (auth_user_id NULL)."""
+    suffix = uuid.uuid4().hex[:8]
+    tenant = Tenant(
+        slug=f"link-{suffix}",
+        legal_name="Link Test SA",
+        rfc=f"LK{suffix.upper()}X",
+        regimen_fiscal_sat="601",
+        domicilio_fiscal_cp="44100",
+        tier="PRINCIPAL",
+        status="ACTIVE",
+    )
+    db.add(tenant)
+    db.flush()
+    admin_role = db.query(Role).filter(Role.nombre == "ADMIN", Role.es_preset.is_(True)).one()
+    user = User(email=email, full_name="Sin login", auth_user_id=None)
+    db.add(user)
+    db.flush()
+    m = Membership(tenant_id=tenant.id, user_id=user.id, role_id=admin_role.id)
+    db.add(m)
+    db.commit()
+    return tenant.id, user.id, m.id
+
+
+def _cleanup(db, tenant_id, user_id, membership_id):
+    db.query(Membership).filter(Membership.id == membership_id).delete()
+    db.query(User).filter(User.id == user_id).delete()
+    db.query(Tenant).filter(Tenant.id == tenant_id).delete()
+    db.commit()
+    db.close()
+
+
+def test_first_login_links_account_by_email(db_engine):
+    """An operator-provisioned user (no auth_user_id yet) is linked on first
+    login by matching the JWT email — case-insensitively on the JWT side."""
+    email = f"first-login-{uuid.uuid4().hex[:8]}@t.test"
+    db = SessionLocal()
+    tenant_id, user_id, membership_id = _provision_unlinked_user(db, email)
+    try:
+        new_sub = f"sub-firstlogin-{uuid.uuid4().hex}"
+        # JWT carries the email upper-cased; resolution must still match.
+        ctx = get_auth_context(principal=_principal(new_sub, email.upper()), x_tenant_id=None)
+        assert ctx.user_id == user_id
+        assert ctx.auth_user_id == new_sub
+        assert ctx.tenant_id == tenant_id
+
+        # The link is persisted, so a second login resolves directly by sub.
+        db.expire_all()
+        assert db.query(User).filter(User.id == user_id).one().auth_user_id == new_sub
+    finally:
+        _cleanup(db, tenant_id, user_id, membership_id)
+
+
+def test_email_bound_to_other_auth_user_is_rejected(db_engine):
+    """If the email is already linked to a different auth user, a new sub with
+    the same email must be refused (account-takeover guard) — not silently
+    relinked."""
+    email = f"conflict-{uuid.uuid4().hex[:8]}@t.test"
+    db = SessionLocal()
+    tenant_id, user_id, membership_id = _provision_unlinked_user(db, email)
+    try:
+        # Bind the account to one auth user.
+        db.query(User).filter(User.id == user_id).update({"auth_user_id": "sub-original"})
+        db.commit()
+
+        # A different sub presenting the same email → 403 conflict.
+        with pytest.raises(HTTPException) as exc:
+            get_auth_context(principal=_principal("sub-impostor", email), x_tenant_id=None)
+        assert exc.value.status_code == 403
+
+        # The original link is untouched.
+        db.expire_all()
+        assert db.query(User).filter(User.id == user_id).one().auth_user_id == "sub-original"
+    finally:
+        _cleanup(db, tenant_id, user_id, membership_id)

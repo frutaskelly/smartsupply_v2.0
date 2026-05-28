@@ -7,6 +7,7 @@ must isolate on its own policy.
 """
 import uuid
 
+import pytest
 from sqlalchemy import text
 
 
@@ -68,6 +69,66 @@ def test_productos_isolated_by_tenant(db_engine):
             count = conn.execute(text("SELECT count(*) FROM productos")).scalar()
             assert count == 0, "no-GUC must expose no products"
 
+            trans.rollback()
+    finally:
+        with db_engine.begin() as conn:
+            conn.execute(text("DELETE FROM tenants WHERE id IN (:a, :b)"), {"a": tid_a, "b": tid_b})
+
+
+def test_insert_with_foreign_tenant_id_is_blocked(db_engine):
+    """The policies declare only USING, so Postgres reuses it as the INSERT
+    WITH CHECK: under tenant A's scope, planting a row tagged tenant B is
+    rejected. This is the write-side half of isolation — app code can't write
+    across tenants even if it set the wrong tenant_id."""
+    tid_a = str(uuid.uuid4())
+    tid_b = str(uuid.uuid4())
+    with db_engine.begin() as conn:
+        _seed_tenants(conn, tid_a, tid_b)
+
+    try:
+        with db_engine.connect() as conn:
+            trans = conn.begin()
+            conn.execute(text("SET LOCAL ROLE app_user"))
+            conn.execute(text("SELECT set_config('app.current_tenant_id', :t, true)"), {"t": tid_a})
+
+            with pytest.raises(Exception) as exc:
+                conn.execute(
+                    text(
+                        """
+                        INSERT INTO productos (id, tenant_id, sku, nombre, clave_sat, unidad_sat)
+                        VALUES (:id, :t, 'X', 'X', '01010101', 'KGM')
+                        """
+                    ),
+                    {"id": str(uuid.uuid4()), "t": tid_b},  # foreign tenant_id
+                )
+            assert "row-level security" in str(exc.value).lower()
+            trans.rollback()
+    finally:
+        with db_engine.begin() as conn:
+            conn.execute(text("DELETE FROM tenants WHERE id IN (:a, :b)"), {"a": tid_a, "b": tid_b})
+
+
+def test_update_cannot_move_row_to_another_tenant(db_engine):
+    """An UPDATE that would re-tag a visible row with a foreign tenant_id is
+    rejected by the same WITH CHECK — you can't exfiltrate a row by moving it."""
+    tid_a = str(uuid.uuid4())
+    tid_b = str(uuid.uuid4())
+    with db_engine.begin() as conn:
+        _seed_tenants(conn, tid_a, tid_b)
+        _seed_producto(conn, tid_a, "A-1")
+
+    try:
+        with db_engine.connect() as conn:
+            trans = conn.begin()
+            conn.execute(text("SET LOCAL ROLE app_user"))
+            conn.execute(text("SELECT set_config('app.current_tenant_id', :t, true)"), {"t": tid_a})
+
+            with pytest.raises(Exception) as exc:
+                conn.execute(
+                    text("UPDATE productos SET tenant_id = :b WHERE sku = 'A-1'"),
+                    {"b": tid_b},
+                )
+            assert "row-level security" in str(exc.value).lower()
             trans.rollback()
     finally:
         with db_engine.begin() as conn:
