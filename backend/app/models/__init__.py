@@ -12,6 +12,7 @@ from .permission import Permission
 from .precio import ListaPrecios, Precio
 from .producto import Producto
 from .proveedor import Proveedor
+from .remision import LineaRemision, Remision
 from .role import Role
 from .role_permission import RolePermission
 from .tenant import Membership, Tenant, User
@@ -39,4 +40,6 @@ __all__ = [
     "OrdenCompra",
     "LineaOrdenCompra",
     "ConversionProducto",
+    "Remision",
+    "LineaRemision",
 ]

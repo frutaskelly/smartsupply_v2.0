@@ -19,6 +19,7 @@ from .api.v1 import (
     ordenes_compra,
     productos,
     proveedores,
+    remisiones,
 )
 
 logging.basicConfig(level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO))
@@ -78,3 +79,4 @@ app.include_router(almacenes.router, prefix="/api/v1")
 app.include_router(inventario.router, prefix="/api/v1")
 app.include_router(ordenes_compra.router, prefix="/api/v1")
 app.include_router(conversiones.router, prefix="/api/v1")
+app.include_router(remisiones.router, prefix="/api/v1")
