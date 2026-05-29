@@ -83,10 +83,13 @@ ALEMBIC_DB_URL="$SUPABASE_DB_URL" alembic upgrade head   # aplicar a la nube
 ## Fases del rebuild
 
 1. ✅ **Cimientos** — repo, docker-compose, config + auth JWKS, CI, baseline RLS.
-2. ⏳ **Núcleo seguro** — schema (tenants/users/memberships/roles), RBAC, RLS.
-3. **Catálogo** — productos, categorías, esquemas, listas de precios, clientes.
-4. **Operaciones** — remisiones, conversiones, inventario, órdenes de compra.
-5. **POS** — pedido → caja → almacén → salida + tracking + devoluciones.
+2. ✅ **Núcleo seguro** — schema (tenants/users/memberships/roles), RBAC, RLS.
+3. ✅ **Catálogo** — productos, categorías, esquemas, listas de precios, clientes.
+4. ✅ **Operaciones** — proveedores, almacenes, inventario (lotes + kardex + mermas),
+   órdenes de compra, conversiones, remisiones (núcleo). Difiere a fases
+   posteriores: overlay POS de la remisión (Fase 5), serie fiscal del folio +
+   acoplamiento a facturas (Fase 6).
+5. ⏳ **POS** — pedido → caja → almacén → salida + tracking + devoluciones.
 6. **Fiscal** — facturas + CFDI 4.0 + series.
 7. **Pulido** — dashboard, sistema de diseño, ESLint, tests, CI verde.
 
