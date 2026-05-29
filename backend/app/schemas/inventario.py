@@ -73,6 +73,7 @@ class LoteOut(ORMModel):
     cantidad_reservada: Decimal
     costo_unitario: Decimal
     proveedor_id: Optional[uuid.UUID] = None
+    orden_compra_id: Optional[uuid.UUID] = None
     notas: Optional[str] = None
     created_at: datetime
     updated_at: datetime

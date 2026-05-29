@@ -6,6 +6,7 @@ from .categoria import CategoriaProducto
 from .cliente import Cliente
 from .esquema_impuesto import EsquemaImpuesto
 from .inventario import LoteInventario, Merma, MovimientoInventario
+from .orden_compra import LineaOrdenCompra, OrdenCompra
 from .permission import Permission
 from .precio import ListaPrecios, Precio
 from .producto import Producto
@@ -34,4 +35,6 @@ __all__ = [
     "LoteInventario",
     "MovimientoInventario",
     "Merma",
+    "OrdenCompra",
+    "LineaOrdenCompra",
 ]

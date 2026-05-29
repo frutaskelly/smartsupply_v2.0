@@ -6,7 +6,8 @@ Every quantity change is atomic: the affected lot is locked with
 `SELECT … FOR UPDATE`, its cached `cantidad_disponible` (and weighted-average
 `costo_unitario` on purchases) is updated, and an immutable `MovimientoInventario`
 row is appended — both in the same RLS-scoped transaction. The lot is a cache;
-the kardex is the source of truth.
+the kardex is the source of truth. The lot/weighted-cost primitives live in
+`app/services/inventario.py` so the purchase-receipt path can't diverge.
 
 The manual endpoint handles operator-initiated movements: ENTRADA_COMPRA,
 AJUSTE, MERMA, TRANSFERENCIA. The remisión / POS flows emit their own
@@ -26,6 +27,12 @@ from ...core.rbac import AuthContext, get_tenant_db, require_permission
 from ...models import Almacen, LoteInventario, Merma, MovimientoInventario, Producto
 from ...schemas.common import Page
 from ...schemas.inventario import ExistenciaRow, LoteOut, MovimientoCreate, MovimientoOut
+from ...services.inventario import (
+    apply_entrada_compra,
+    build_movimiento,
+    resolve_lote,
+    weighted_cost,
+)
 from ._helpers import ensure_fk, paginate
 
 router = APIRouter(prefix="/inventario", tags=["inventario"])
@@ -34,84 +41,6 @@ _READ = "menu:inventario"
 _WRITE = "inventario:gestionar"
 _ZERO = Decimal("0")
 _Q = Decimal("0.0001")
-
-
-# ─── helpers ─────────────────────────────────────────────────────────────────
-def _resolve_lote(
-    db: Session,
-    ctx: AuthContext,
-    producto_id: UUID,
-    almacen_id: UUID,
-    *,
-    numero_lote: Optional[str],
-    lote_id: Optional[UUID] = None,
-    create: bool = False,
-    fecha_caducidad=None,
-    costo_inicial: Decimal = _ZERO,
-) -> Optional[LoteInventario]:
-    """Locate (and lock) the target lot, optionally creating the default one.
-
-    With an explicit `lote_id`, returns that lot (locked) or None. Otherwise it
-    matches on (producto, almacén, numero_lote) — numero_lote None being the
-    'default' lot — and creates it when `create` is set.
-    """
-    if lote_id is not None:
-        return (
-            db.query(LoteInventario)
-            .filter(
-                LoteInventario.id == lote_id,
-                LoteInventario.producto_id == producto_id,
-                LoteInventario.almacen_id == almacen_id,
-            )
-            .with_for_update()
-            .one_or_none()
-        )
-
-    query = db.query(LoteInventario).filter(
-        LoteInventario.producto_id == producto_id,
-        LoteInventario.almacen_id == almacen_id,
-    )
-    if numero_lote is not None:
-        query = query.filter(LoteInventario.numero_lote == numero_lote)
-    else:
-        query = query.filter(LoteInventario.numero_lote.is_(None))
-    lote = query.with_for_update().first()
-
-    if lote is None and create:
-        lote = LoteInventario(
-            tenant_id=ctx.tenant_id,
-            producto_id=producto_id,
-            almacen_id=almacen_id,
-            numero_lote=numero_lote,
-            fecha_caducidad=fecha_caducidad,
-            cantidad_inicial=_ZERO,
-            cantidad_disponible=_ZERO,
-            cantidad_reservada=_ZERO,
-            costo_unitario=costo_inicial,
-        )
-        db.add(lote)
-        db.flush()
-    return lote
-
-
-def _mov(ctx, lote, tipo, cantidad, *, costo=None, motivo=None, notas=None):
-    return MovimientoInventario(
-        tenant_id=ctx.tenant_id,
-        tipo=tipo,
-        lote_id=lote.id,
-        cantidad=cantidad,
-        costo_unitario=costo,
-        motivo=motivo,
-        notas=notas,
-        created_by=ctx.user_id,
-    )
-
-
-def _weighted(qty_old: Decimal, cost_old: Decimal, qty_in: Decimal, cost_in: Decimal) -> Decimal:
-    total = qty_old + qty_in
-    if total <= 0:
-        return cost_in
-    return (((qty_old * cost_old) + (qty_in * cost_in)) / total).quantize(_Q)
 
 
 # ─── existencias (aggregated view) ───────────────────────────────────────────
@@ -214,26 +143,18 @@ def create_movimiento(
     movimientos: list[MovimientoInventario] = []
 
     if payload.tipo == "ENTRADA_COMPRA":
-        lote = _resolve_lote(
-            db, ctx, payload.producto_id, payload.almacen_id,
-            numero_lote=payload.numero_lote, lote_id=payload.lote_id, create=True,
-            fecha_caducidad=payload.fecha_caducidad, costo_inicial=payload.costo_unitario or _ZERO,
+        _, mov = apply_entrada_compra(
+            db, ctx.tenant_id, ctx.user_id,
+            producto_id=payload.producto_id, almacen_id=payload.almacen_id,
+            cantidad=cantidad, costo=payload.costo_unitario,
+            numero_lote=payload.numero_lote, fecha_caducidad=payload.fecha_caducidad,
+            motivo=payload.motivo, notas=payload.notas,
         )
-        if lote is None:
-            raise HTTPException(status_code=404, detail="Lote no encontrado")
-        lote.costo_unitario = _weighted(
-            lote.cantidad_disponible, lote.costo_unitario, cantidad, payload.costo_unitario
-        )
-        lote.cantidad_disponible = lote.cantidad_disponible + cantidad
-        lote.cantidad_inicial = lote.cantidad_inicial + cantidad
-        if payload.fecha_caducidad and not lote.fecha_caducidad:
-            lote.fecha_caducidad = payload.fecha_caducidad
-        movimientos.append(_mov(ctx, lote, "ENTRADA_COMPRA", cantidad,
-                                costo=payload.costo_unitario, motivo=payload.motivo, notas=payload.notas))
+        movimientos.append(mov)
 
     elif payload.tipo == "AJUSTE":
-        lote = _resolve_lote(
-            db, ctx, payload.producto_id, payload.almacen_id,
+        lote = resolve_lote(
+            db, ctx.tenant_id, payload.producto_id, payload.almacen_id,
             numero_lote=payload.numero_lote, lote_id=payload.lote_id, create=True,
             fecha_caducidad=payload.fecha_caducidad,
         )
@@ -245,11 +166,12 @@ def create_movimiento(
         lote.cantidad_disponible = nueva
         if cantidad > 0:
             lote.cantidad_inicial = lote.cantidad_inicial + cantidad
-        movimientos.append(_mov(ctx, lote, "AJUSTE", cantidad, motivo=payload.motivo, notas=payload.notas))
+        movimientos.append(build_movimiento(ctx.tenant_id, ctx.user_id, lote, "AJUSTE", cantidad,
+                                             motivo=payload.motivo, notas=payload.notas))
 
     elif payload.tipo == "MERMA":
-        lote = _resolve_lote(
-            db, ctx, payload.producto_id, payload.almacen_id,
+        lote = resolve_lote(
+            db, ctx.tenant_id, payload.producto_id, payload.almacen_id,
             numero_lote=payload.numero_lote, lote_id=payload.lote_id, create=False,
         )
         if lote is None:
@@ -261,15 +183,15 @@ def create_movimiento(
             tenant_id=ctx.tenant_id, lote_id=lote.id, cantidad=cantidad,
             motivo=payload.merma_motivo, descripcion=payload.notas, created_by=ctx.user_id,
         ))
-        movimientos.append(_mov(ctx, lote, "MERMA", -cantidad,
-                                motivo=payload.motivo or payload.merma_motivo, notas=payload.notas))
+        movimientos.append(build_movimiento(ctx.tenant_id, ctx.user_id, lote, "MERMA", -cantidad,
+                                            motivo=payload.motivo or payload.merma_motivo, notas=payload.notas))
 
     elif payload.tipo == "TRANSFERENCIA":
         ensure_fk(db, Almacen, payload.almacen_destino_id, "almacen_destino_id")
         if payload.almacen_destino_id == payload.almacen_id:
             raise HTTPException(status_code=422, detail="El almacén destino debe ser distinto del origen")
-        origen = _resolve_lote(
-            db, ctx, payload.producto_id, payload.almacen_id,
+        origen = resolve_lote(
+            db, ctx.tenant_id, payload.producto_id, payload.almacen_id,
             numero_lote=payload.numero_lote, lote_id=payload.lote_id, create=False,
         )
         if origen is None:
@@ -278,18 +200,18 @@ def create_movimiento(
             raise HTTPException(status_code=422, detail="Existencia insuficiente para la transferencia")
         costo_origen = origen.costo_unitario
         origen.cantidad_disponible = origen.cantidad_disponible - cantidad
-        destino = _resolve_lote(
-            db, ctx, payload.producto_id, payload.almacen_destino_id,
+        destino = resolve_lote(
+            db, ctx.tenant_id, payload.producto_id, payload.almacen_destino_id,
             numero_lote=payload.numero_lote, create=True,
             fecha_caducidad=origen.fecha_caducidad, costo_inicial=costo_origen,
         )
-        destino.costo_unitario = _weighted(destino.cantidad_disponible, destino.costo_unitario, cantidad, costo_origen)
+        destino.costo_unitario = weighted_cost(destino.cantidad_disponible, destino.costo_unitario, cantidad, costo_origen)
         destino.cantidad_disponible = destino.cantidad_disponible + cantidad
         destino.cantidad_inicial = destino.cantidad_inicial + cantidad
-        movimientos.append(_mov(ctx, origen, "TRANSFERENCIA", -cantidad, costo=costo_origen,
-                                motivo=payload.motivo, notas=payload.notas))
-        movimientos.append(_mov(ctx, destino, "TRANSFERENCIA", cantidad, costo=costo_origen,
-                                motivo=payload.motivo, notas=payload.notas))
+        movimientos.append(build_movimiento(ctx.tenant_id, ctx.user_id, origen, "TRANSFERENCIA", -cantidad,
+                                            costo=costo_origen, motivo=payload.motivo, notas=payload.notas))
+        movimientos.append(build_movimiento(ctx.tenant_id, ctx.user_id, destino, "TRANSFERENCIA", cantidad,
+                                            costo=costo_origen, motivo=payload.motivo, notas=payload.notas))
 
     for m in movimientos:
         db.add(m)

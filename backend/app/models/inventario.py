@@ -74,6 +74,9 @@ class LoteInventario(Base, TimestampMixin):
     proveedor_id = Column(
         UUID(as_uuid=True), ForeignKey("proveedores.id", ondelete="SET NULL")
     )
+    orden_compra_id = Column(
+        UUID(as_uuid=True), ForeignKey("ordenes_compra.id", ondelete="SET NULL")
+    )
     notas = Column(Text)
 
 
