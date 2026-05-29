@@ -8,12 +8,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from . import __version__
 from .core.config import settings
 from .api.v1 import (
+    almacenes,
     auth,
     categorias,
     clientes,
     esquemas_impuesto,
     listas_precios,
     productos,
+    proveedores,
 )
 
 logging.basicConfig(level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO))
@@ -67,3 +69,6 @@ app.include_router(esquemas_impuesto.router, prefix="/api/v1")
 app.include_router(productos.router, prefix="/api/v1")
 app.include_router(listas_precios.router, prefix="/api/v1")
 app.include_router(clientes.router, prefix="/api/v1")
+# Phase 4 — operaciones
+app.include_router(proveedores.router, prefix="/api/v1")
+app.include_router(almacenes.router, prefix="/api/v1")
