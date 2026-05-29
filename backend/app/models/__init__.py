@@ -5,6 +5,7 @@ from .almacen import Almacen
 from .categoria import CategoriaProducto
 from .cliente import Cliente
 from .esquema_impuesto import EsquemaImpuesto
+from .inventario import LoteInventario, Merma, MovimientoInventario
 from .permission import Permission
 from .precio import ListaPrecios, Precio
 from .producto import Producto
@@ -30,4 +31,7 @@ __all__ = [
     # ── Phase 4: operaciones ──
     "Proveedor",
     "Almacen",
+    "LoteInventario",
+    "MovimientoInventario",
+    "Merma",
 ]

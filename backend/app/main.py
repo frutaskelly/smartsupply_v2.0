@@ -13,6 +13,7 @@ from .api.v1 import (
     categorias,
     clientes,
     esquemas_impuesto,
+    inventario,
     listas_precios,
     productos,
     proveedores,
@@ -72,3 +73,4 @@ app.include_router(clientes.router, prefix="/api/v1")
 # Phase 4 — operaciones
 app.include_router(proveedores.router, prefix="/api/v1")
 app.include_router(almacenes.router, prefix="/api/v1")
+app.include_router(inventario.router, prefix="/api/v1")
