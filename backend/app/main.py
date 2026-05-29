@@ -12,6 +12,7 @@ from .api.v1 import (
     auth,
     categorias,
     clientes,
+    conversiones,
     esquemas_impuesto,
     inventario,
     listas_precios,
@@ -76,3 +77,4 @@ app.include_router(proveedores.router, prefix="/api/v1")
 app.include_router(almacenes.router, prefix="/api/v1")
 app.include_router(inventario.router, prefix="/api/v1")
 app.include_router(ordenes_compra.router, prefix="/api/v1")
+app.include_router(conversiones.router, prefix="/api/v1")
