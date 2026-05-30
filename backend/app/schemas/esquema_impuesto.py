@@ -2,11 +2,13 @@
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
 from .common import ORMModel
+
+TipoIeps = Literal["TASA", "CUOTA"]
 
 
 class EsquemaImpuestoBase(BaseModel):
@@ -15,6 +17,9 @@ class EsquemaImpuestoBase(BaseModel):
     descripcion: Optional[str] = None
     iva_tasa: Decimal = Field(default=Decimal("0"), ge=0, le=1)
     ieps_tasa: Decimal = Field(default=Decimal("0"), ge=0, le=1)
+    # IEPS: TASA = porcentaje (fracción, p.ej. 0.08); CUOTA = $/litro (ieps_cuota)
+    tipo_ieps: TipoIeps = "TASA"
+    ieps_cuota: Decimal = Field(default=Decimal("0"), ge=0)
     iva_exento: bool = False
     retencion_iva_tasa: Decimal = Field(default=Decimal("0"), ge=0, le=1)
     retencion_isr_tasa: Decimal = Field(default=Decimal("0"), ge=0, le=1)
@@ -31,6 +36,8 @@ class EsquemaImpuestoUpdate(BaseModel):
     descripcion: Optional[str] = None
     iva_tasa: Optional[Decimal] = Field(default=None, ge=0, le=1)
     ieps_tasa: Optional[Decimal] = Field(default=None, ge=0, le=1)
+    tipo_ieps: Optional[TipoIeps] = None
+    ieps_cuota: Optional[Decimal] = Field(default=None, ge=0)
     iva_exento: Optional[bool] = None
     retencion_iva_tasa: Optional[Decimal] = Field(default=None, ge=0, le=1)
     retencion_isr_tasa: Optional[Decimal] = Field(default=None, ge=0, le=1)

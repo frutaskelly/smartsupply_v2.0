@@ -603,3 +603,50 @@ def test_categoria_pagination(client, env, auth_as):
 
     r = client.get("/api/v1/categorias", headers=h, params={"limit": 2, "offset": 2}).json()
     assert r["total"] == 3 and len(r["items"]) == 1 and r["items"][0]["codigo"] == "C3"
+
+
+# ─── catch-weight + fiscal fields (migration 0015) ───────────────────────────
+def test_producto_peso_variable_and_fiscal_fields(client, env, auth_as):
+    auth_as(env["admin_a"])
+    h = _hdr(env["admin_a"])
+    r = client.post("/api/v1/productos", headers=h, json={
+        "sku": "SANDIA", "nombre": "Sandía", "clave_sat": "50360000", "unidad_sat": "KGM",
+        "unidad_base": "KILO", "presentaciones": {"KILO": 1, "PIEZA": 8},
+        "peso_variable": True, "codigo_barras": "7501234567890", "contenido_litros": "0.6"})
+    assert r.status_code == 201, r.text
+    p = r.json()
+    assert p["peso_variable"] is True
+    assert p["codigo_barras"] == "7501234567890"
+    assert float(p["contenido_litros"]) == 0.6
+
+    # defaults: omitting them → peso_variable False, the rest null
+    r2 = client.post("/api/v1/productos", headers=h, json={
+        "sku": "ARROZ", "nombre": "Arroz", "clave_sat": "50100000", "unidad_sat": "H87"})
+    body = r2.json()
+    assert body["peso_variable"] is False
+    assert body["codigo_barras"] is None and body["contenido_litros"] is None
+
+
+def test_esquema_ieps_cuota_and_tasa(client, env, auth_as):
+    auth_as(env["admin_a"])
+    h = _hdr(env["admin_a"])
+    # bebida saborizada: IVA 16% + IEPS cuota $3.0818/L
+    r = client.post("/api/v1/esquemas-impuesto", headers=h, json={
+        "codigo": "BEBAZ", "nombre": "Bebida azucarada", "iva_tasa": "0.16",
+        "tipo_ieps": "CUOTA", "ieps_cuota": "3.0818"})
+    assert r.status_code == 201, r.text
+    esq = r.json()
+    assert esq["tipo_ieps"] == "CUOTA" and float(esq["ieps_cuota"]) == 3.0818
+
+    # botana: IEPS 8% como tasa; default tipo_ieps = TASA cuando se omite
+    r2 = client.post("/api/v1/esquemas-impuesto", headers=h, json={
+        "codigo": "BOT8", "nombre": "Botana", "ieps_tasa": "0.08"})
+    assert r2.json()["tipo_ieps"] == "TASA" and float(r2.json()["ieps_cuota"]) == 0.0
+
+
+def test_esquema_invalid_tipo_ieps_422(client, env, auth_as):
+    auth_as(env["admin_a"])
+    h = _hdr(env["admin_a"])
+    r = client.post("/api/v1/esquemas-impuesto", headers=h, json={
+        "codigo": "BAD2", "nombre": "x", "tipo_ieps": "PORCENTAJE"})
+    assert r.status_code == 422

@@ -69,6 +69,11 @@ class Producto(Base, TimestampMixin, SoftDeleteMixin):
     presentacion_default = Column(String(20), server_default="KILO")
     unidad_entrada = Column(String(20))
     unidad_salida = Column(String(20))
+    # Catch-weight: when true, the presentation factor is only an estimate and
+    # the real weight is captured at receiving/delivery (sandía, carnes al peso).
+    peso_variable = Column(Boolean, nullable=False, server_default="false")
+    codigo_barras = Column(String(20))            # EAN-13/GTIN of the consumer unit
+    contenido_litros = Column(Numeric(10, 4))     # liters/pieza → base for IEPS cuota
 
     # ── inventory attributes ──
     perecedero = Column(Boolean, nullable=False, server_default="false")

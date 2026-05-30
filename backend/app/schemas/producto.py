@@ -27,6 +27,9 @@ class ProductoBase(BaseModel):
     presentacion_default: Optional[str] = Field(default="KILO", max_length=20)
     unidad_entrada: Optional[str] = Field(default=None, max_length=20)
     unidad_salida: Optional[str] = Field(default=None, max_length=20)
+    peso_variable: bool = False
+    codigo_barras: Optional[str] = Field(default=None, max_length=20)
+    contenido_litros: Optional[Decimal] = Field(default=None, ge=0)
     # inventory attributes
     perecedero: bool = False
     cold_chain: bool = False
@@ -59,6 +62,9 @@ class ProductoUpdate(BaseModel):
     presentacion_default: Optional[str] = Field(default=None, max_length=20)
     unidad_entrada: Optional[str] = Field(default=None, max_length=20)
     unidad_salida: Optional[str] = Field(default=None, max_length=20)
+    peso_variable: Optional[bool] = None
+    codigo_barras: Optional[str] = Field(default=None, max_length=20)
+    contenido_litros: Optional[Decimal] = Field(default=None, ge=0)
     perecedero: Optional[bool] = None
     cold_chain: Optional[bool] = None
     requiere_lote: Optional[bool] = None

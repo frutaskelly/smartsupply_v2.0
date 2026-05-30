@@ -24,6 +24,10 @@ class EsquemaImpuesto(Base, TimestampMixin, SoftDeleteMixin):
     # Rates stored as fractions: 0.16 == 16%.
     iva_tasa = Column(Numeric(5, 4), nullable=False, server_default="0")
     ieps_tasa = Column(Numeric(5, 4), nullable=False, server_default="0")
+    # IEPS form: 'TASA' = percentage (botanas 8%), 'CUOTA' = fixed $/litro
+    # (bebidas saborizadas). `ieps_cuota` holds the $/litro when tipo_ieps='CUOTA'.
+    tipo_ieps = Column(String(10), nullable=False, server_default="TASA")
+    ieps_cuota = Column(Numeric(10, 4), nullable=False, server_default="0")
     iva_exento = Column(Boolean, nullable=False, server_default="false")
     retencion_iva_tasa = Column(Numeric(5, 4), nullable=False, server_default="0")
     retencion_isr_tasa = Column(Numeric(5, 4), nullable=False, server_default="0")
