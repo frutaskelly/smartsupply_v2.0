@@ -12,6 +12,7 @@ import {
   Truck,
   UserCog,
   Users,
+  Warehouse,
   type LucideIcon,
 } from "lucide-react";
 
@@ -39,6 +40,7 @@ export const NAV: NavSection[] = [
     section: "Operaciones",
     items: [
       { label: "Inventario", href: "/inventario", perm: "menu:inventario", icon: Boxes },
+      { label: "Almacenes", href: "/almacenes", perm: "menu:inventario", icon: Warehouse },
       { label: "Compras", href: "/compras", perm: "menu:compras", icon: ShoppingCart },
       { label: "Proveedores", href: "/proveedores", perm: "menu:compras", icon: Truck },
       { label: "Remisiones", href: "/remisiones", perm: "menu:remisiones", icon: FileText },

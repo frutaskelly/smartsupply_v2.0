@@ -71,6 +71,52 @@ export type Cliente = {
   updated_at: string;
 };
 
+export type Proveedor = {
+  id: string;
+  tenant_id: string;
+  codigo: string;
+  nombre: string;
+  rfc?: string | null;
+  contacto?: string | null;
+  telefono?: string | null;
+  email?: string | null;
+  categorias: string[];
+  condiciones_pago?: string | null;
+  activo: boolean;
+  notas?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type Almacen = {
+  id: string;
+  tenant_id: string;
+  codigo: string;
+  nombre: string;
+  direccion?: string | null;
+  es_default: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type Conversion = {
+  id: string;
+  tenant_id: string;
+  producto_catalogado_id: string;
+  producto_no_catalogado_id: string;
+  factor: string;
+  merma_pct: string;
+  precio_no_cat?: string | null;
+  mezcla_grupo_id?: string | null;
+  mezcla_proporcion?: string | null;
+  prioridad: number;
+  requiere_aprobacion: boolean;
+  activo: boolean;
+  notas?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type Producto = {
   id: string;
   tenant_id: string;
