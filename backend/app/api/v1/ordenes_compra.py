@@ -200,10 +200,10 @@ def recibir_orden(
 
     by_id = {ln.id: ln for ln in oc.lineas}
     if payload.recepciones:
-        recepciones = [(r.linea_id, r.cantidad) for r in payload.recepciones]
+        recepciones = [(r.linea_id, r.cantidad, r.cantidad_base) for r in payload.recepciones]
     else:
         recepciones = [
-            (ln.id, ln.cantidad_solicitada - ln.cantidad_recibida)
+            (ln.id, ln.cantidad_solicitada - ln.cantidad_recibida, None)
             for ln in oc.lineas
             if ln.cantidad_solicitada - ln.cantidad_recibida > 0
         ]
@@ -213,21 +213,21 @@ def recibir_orden(
     # Products carry the presentation→base-unit factors; load them once so the
     # receipt can convert document quantities (in presentation units) to the
     # base units inventory is stored in.
-    prod_ids = {by_id[lid].producto_id for lid, _ in recepciones if by_id.get(lid)}
+    prod_ids = {by_id[lid].producto_id for lid, _, _ in recepciones if by_id.get(lid)}
     productos = {p.id: p for p in db.query(Producto).filter(Producto.id.in_(prod_ids)).all()}
 
-    for linea_id, cantidad in recepciones:
+    for linea_id, cantidad, cantidad_base in recepciones:
         ln = by_id.get(linea_id)
         if ln is None:
             raise HTTPException(status_code=404, detail="La línea no pertenece a esta orden")
         pendiente = ln.cantidad_solicitada - ln.cantidad_recibida
         if cantidad > pendiente:
             raise HTTPException(status_code=422, detail="La cantidad recibida excede lo pendiente de la línea")
-        # cantidad + precio_unitario are per presentation; convert to base units
-        # for inventory, and derive the per-base-unit cost (precio / factor).
+        # Base units into inventory: the real weighed amount (catch-weight) when
+        # given, else cantidad×factor. Per-base cost = total de la línea / base.
         factor = presentacion_factor(productos.get(ln.producto_id), ln.presentacion)
-        base_qty = cantidad * factor
-        costo_base = (ln.precio_unitario / factor) if factor else ln.precio_unitario
+        base_qty = cantidad_base if cantidad_base is not None else (cantidad * factor)
+        costo_base = (ln.precio_unitario * cantidad / base_qty) if base_qty else ln.precio_unitario
         apply_entrada_compra(
             db, ctx.tenant_id, ctx.user_id,
             producto_id=ln.producto_id, almacen_id=almacen_id,

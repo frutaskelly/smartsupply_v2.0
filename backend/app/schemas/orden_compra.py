@@ -76,7 +76,10 @@ class TransitionIn(BaseModel):
 
 class RecepcionLinea(BaseModel):
     linea_id: uuid.UUID
-    cantidad: Decimal = Field(gt=0)
+    cantidad: Decimal = Field(gt=0)  # en unidades de la presentación de la línea
+    # Peso/medida real en UNIDADES BASE (catch-weight). Si se envía, manda sobre
+    # el estimado cantidad×factor — para sandía/carnes pesadas al recibir.
+    cantidad_base: Optional[Decimal] = Field(default=None, gt=0)
 
 
 class RecibirIn(BaseModel):

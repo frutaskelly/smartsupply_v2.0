@@ -79,3 +79,15 @@ class RemisionOut(ORMModel):
 
 class RemisionDetailOut(RemisionOut):
     lineas: list[LineaRemisionOut] = []
+
+
+class PesoLinea(BaseModel):
+    linea_id: uuid.UUID
+    # Peso/medida real en UNIDADES BASE (catch-weight) para esta línea.
+    cantidad_base: Decimal = Field(gt=0)
+
+
+class ConfirmarRemisionIn(BaseModel):
+    """Cuerpo opcional al confirmar: pesos reales por línea (peso variable).
+    Si no se envía, se reserva el estimado cantidad×factor."""
+    pesos: Optional[list[PesoLinea]] = None

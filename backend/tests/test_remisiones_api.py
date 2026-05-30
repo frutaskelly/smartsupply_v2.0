@@ -166,6 +166,34 @@ def test_confirm_with_presentation_reserves_base_units(client, env, auth_as):
     assert float(row2["reservada"]) == 0.0
 
 
+def test_confirm_with_real_weight_catch_weight(client, env, auth_as):
+    """Confirmar con peso real por línea (catch-weight): reserva 43 kg (no el
+    estimado 40 = 2×20), y cancelar libera exactamente esos 43."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    pid = env["prod_bulto_a"]
+    client.post("/api/v1/inventario/movimientos", headers=h, json={
+        "tipo": "ENTRADA_COMPRA", "producto_id": pid, "almacen_id": env["alm_a"],
+        "cantidad": "100", "costo_unitario": "4"})
+    rem = client.post("/api/v1/remisiones", headers=h, json={
+        "cliente_facturacion_id": env["cli_a"], "almacen_id": env["alm_a"],
+        "lineas": [{"producto_id": pid, "cantidad_solicitada": "2",
+                    "precio_unitario": "150", "presentacion": "BULTO"}]}).json()
+    rem_id, linea_id = rem["id"], rem["lineas"][0]["id"]
+
+    def _row():
+        rows = client.get("/api/v1/inventario/existencias", headers=h, params={"producto_id": pid}).json()
+        return next(r for r in rows if r["almacen_id"] == env["alm_a"])
+
+    c = client.post(f"/api/v1/remisiones/{rem_id}/confirmar", headers=h,
+                    json={"pesos": [{"linea_id": linea_id, "cantidad_base": "43"}]})
+    assert c.status_code == 200, c.text
+    assert float(_row()["disponible"]) == 57.0   # 100 − 43 (real, no 40)
+    assert float(_row()["reservada"]) == 43.0
+
+    assert client.post(f"/api/v1/remisiones/{rem_id}/cancelar", headers=h).status_code == 200
+    assert float(_row()["disponible"]) == 100.0 and float(_row()["reservada"]) == 0.0
+
+
 def test_confirm_insufficient_stock(client, env, auth_as):
     auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
     rem_id = _create_rem(client, h, env, "30", "5").json()["id"]  # no stock loaded

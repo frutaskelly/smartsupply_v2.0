@@ -15,7 +15,7 @@ from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -30,7 +30,13 @@ from ...models import (
     Remision,
 )
 from ...schemas.common import Page
-from ...schemas.remision import RemisionCreate, RemisionDetailOut, RemisionOut, RemisionUpdate
+from ...schemas.remision import (
+    ConfirmarRemisionIn,
+    RemisionCreate,
+    RemisionDetailOut,
+    RemisionOut,
+    RemisionUpdate,
+)
 from ...services.inventario import build_movimiento, presentacion_factor, resolve_lote
 from ._helpers import ensure_fk, flush_or_conflict, get_or_404, paginate
 
@@ -168,6 +174,7 @@ def update_remision(
 @router.post("/{rem_id}/confirmar", response_model=RemisionDetailOut)
 def confirmar_remision(
     rem_id: UUID,
+    payload: ConfirmarRemisionIn | None = Body(default=None),
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_WRITE)),
 ):
@@ -177,14 +184,20 @@ def confirmar_remision(
     if rem.almacen_id is None:
         raise HTTPException(status_code=422, detail="La remisión requiere un almacén para reservar inventario")
 
+    # Optional per-line real weights (catch-weight); override the estimate.
+    pesos = {p.linea_id: p.cantidad_base for p in (payload.pesos or [])} if payload else {}
+
     # Lines carry a presentation + a quantity in that presentation; reserve the
-    # equivalent in base units (the unit inventory is stored in).
+    # equivalent in base units (the unit inventory is stored in). The reserved
+    # base amount is stamped on the line (cantidad_surtida) so cancel releases
+    # exactly what was held.
     prod_ids = {ln.producto_id for ln in rem.lineas}
     productos = {p.id: p for p in db.query(Producto).filter(Producto.id.in_(prod_ids)).all()}
 
     for ln in rem.lineas:
         factor = presentacion_factor(productos.get(ln.producto_id), ln.presentacion)
-        base_qty = ln.cantidad_solicitada * factor
+        real = pesos.get(ln.id)
+        base_qty = real if real is not None else (ln.cantidad_solicitada * factor)
         lote = resolve_lote(db, ctx.tenant_id, ln.producto_id, rem.almacen_id, numero_lote=None, create=False)
         if lote is None or lote.cantidad_disponible < base_qty:
             raise HTTPException(
@@ -194,6 +207,7 @@ def confirmar_remision(
         lote.cantidad_disponible = lote.cantidad_disponible - base_qty
         lote.cantidad_reservada = lote.cantidad_reservada + base_qty
         ln.lote_id = lote.id
+        ln.cantidad_surtida = base_qty
         db.add(build_movimiento(
             ctx.tenant_id, ctx.user_id, lote, "SALIDA_REMISION", -base_qty,
             ref_tipo="REMISION", ref_id=rem.id, motivo=f"Reserva remisión {rem.folio_interno}",
@@ -230,9 +244,13 @@ def cancelar_remision(
             )
             if lote is None:
                 continue
-            # release the same base-unit amount that was reserved at confirm
-            factor = presentacion_factor(productos.get(ln.producto_id), ln.presentacion)
-            cantidad = ln.cantidad_solicitada * factor
+            # release exactly what was reserved at confirm (stored base units);
+            # fall back to the estimate for legacy rows without cantidad_surtida.
+            if ln.cantidad_surtida is not None:
+                cantidad = ln.cantidad_surtida
+            else:
+                factor = presentacion_factor(productos.get(ln.producto_id), ln.presentacion)
+                cantidad = ln.cantidad_solicitada * factor
             lote.cantidad_reservada = max(_ZERO, lote.cantidad_reservada - cantidad)
             lote.cantidad_disponible = lote.cantidad_disponible + cantidad
             db.add(build_movimiento(

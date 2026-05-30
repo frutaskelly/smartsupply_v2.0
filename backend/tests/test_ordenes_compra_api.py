@@ -190,6 +190,29 @@ def test_receive_with_presentation_converts_to_base_units(client, env, auth_as):
     assert float(row["costo_promedio"]) == 5.0        # 100 / 20 per base unit
 
 
+def test_receive_with_real_weight_catch_weight(client, env, auth_as):
+    """Catch-weight: ordeno 2 BULTO (estimado 40 kg) pero el peso real es 45 kg.
+    El inventario usa el peso real y el costo = (precio×cantidad)/peso_real."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    oc = client.post("/api/v1/ordenes-compra", headers=h, json={
+        "proveedor_id": env["prov_a"], "almacen_destino_id": env["alm_a"],
+        "lineas": [{"producto_id": env["prod_bulto_a"], "cantidad_solicitada": "2",
+                    "precio_unitario": "100", "presentacion": "BULTO"}]}).json()
+    oc_id, linea_id = oc["id"], oc["lineas"][0]["id"]
+    for nuevo in ("ENVIADA", "ACEPTADA", "EN_TRANSITO"):
+        client.post(f"/api/v1/ordenes-compra/{oc_id}/transition", headers=h, json={"nuevo_estado": nuevo})
+
+    rec = client.post(f"/api/v1/ordenes-compra/{oc_id}/recibir", headers=h, json={
+        "recepciones": [{"linea_id": linea_id, "cantidad": "2", "cantidad_base": "45"}]})
+    assert rec.status_code == 200, rec.text
+
+    ex = client.get("/api/v1/inventario/existencias", headers=h,
+                    params={"producto_id": env["prod_bulto_a"]}).json()
+    row = next(x for x in ex if x["almacen_id"] == env["alm_a"])
+    assert float(row["disponible"]) == 45.0                      # peso real, no 40
+    assert abs(float(row["costo_promedio"]) - (200 / 45)) < 0.01  # (100×2)/45
+
+
 def test_tomador_cannot_touch_compras(client, env, auth_as):
     auth_as(env["tomador_a"]); h = _hdr(env["tomador_a"])
     assert client.get("/api/v1/ordenes-compra", headers=h).status_code == 403
