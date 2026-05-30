@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -10,7 +10,7 @@ import { DataTable, type Column } from "@/components/ui/DataTable";
 import { Field, Input, Select, Switch, Textarea } from "@/components/ui/Field";
 import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { ApiError } from "@/lib/api";
+import { ApiError, apiFetch } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import { fmtMoney } from "@/lib/format";
 import { useMutation, useResource, type Page } from "@/lib/hooks";
@@ -107,6 +107,33 @@ export default function ProductosPage() {
   const [form, setForm] = useState<FormState | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [toDelete, setToDelete] = useState<Producto | null>(null);
+  const [suggesting, setSuggesting] = useState(false);
+
+  async function suggestSat() {
+    if (!form) return;
+    if (!form.nombre.trim()) {
+      toast.error("Escribe el nombre del producto primero");
+      return;
+    }
+    setSuggesting(true);
+    try {
+      const s = await apiFetch<{
+        clave_sat: string;
+        unidad_sat: string;
+        descripcion_clave: string;
+        confianza: string;
+      }>("/api/v1/sat/sugerir", {
+        method: "POST",
+        body: JSON.stringify({ nombre: form.nombre, descripcion: form.descripcion || null }),
+      });
+      setForm((f) => (f ? { ...f, clave_sat: s.clave_sat, unidad_sat: s.unidad_sat } : f));
+      toast.success(`SAT sugerido (${s.confianza}): ${s.descripcion_clave}`);
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudo sugerir");
+    } finally {
+      setSuggesting(false);
+    }
+  }
 
   function openCreate() {
     setEditingId(null);
@@ -316,6 +343,11 @@ export default function ProductosPage() {
                 onChange={(e) => setForm({ ...form, costo_promedio: e.target.value })}
               />
             </Field>
+            <div className="sm:col-span-2">
+              <Button type="button" variant="secondary" onClick={suggestSat} disabled={suggesting}>
+                <Sparkles size={16} /> {suggesting ? "Sugiriendo…" : "Sugerir SAT con IA"}
+              </Button>
+            </div>
             <Field label="Clave SAT" hint="Clave de producto/servicio SAT">
               <Input value={form.clave_sat} onChange={(e) => setForm({ ...form, clave_sat: e.target.value })} />
             </Field>

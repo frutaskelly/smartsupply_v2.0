@@ -34,6 +34,9 @@ class Settings(BaseSettings):
 
     # ─── Integrations ───────────────────────────────────────────────────────────
     ANTHROPIC_API_KEY: str = ""
+    # Model for the SAT-code suggester. Defaults to Opus; set to
+    # `claude-haiku-4-5` to cut cost ~5x for this simple classification.
+    SAT_AI_MODEL: str = "claude-opus-4-8"
     FACTURAMA_BASE_URL: str = "https://apisandbox.facturama.mx"
     FACTURAMA_API_KEY: str = ""
     FACTURAMA_USER: str = ""
