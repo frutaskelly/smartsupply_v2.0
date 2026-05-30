@@ -91,6 +91,44 @@ export type Precio = {
   vigencia_hasta?: string | null;
 };
 
+export type Sucursal = {
+  id: string;
+  tenant_id: string;
+  cliente_id: string;
+  codigo?: string | null;
+  nombre: string;
+  lista_precios_id?: string | null;
+  domicilio: Record<string, unknown>;
+  contacto?: string | null;
+  telefono?: string | null;
+  activo: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PrecioOverride = {
+  id: string;
+  tenant_id: string;
+  cliente_id?: string | null;
+  sucursal_id?: string | null;
+  producto_id: string;
+  presentacion: string;
+  precio_unitario: string;
+  vigencia_desde?: string | null;
+  vigencia_hasta?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type Cotizacion = {
+  producto_id: string;
+  presentacion: string;
+  cantidad: string;
+  precio?: string | null;
+  origen?: string | null;
+  lista_id?: string | null;
+};
+
 export type Cliente = {
   id: string;
   tenant_id: string;

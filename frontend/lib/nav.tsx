@@ -1,5 +1,6 @@
 import {
   Boxes,
+  Building2,
   FileText,
   FolderTree,
   LayoutDashboard,
@@ -33,6 +34,7 @@ export const NAV: NavSection[] = [
       { label: "Categorías", href: "/categorias", perm: "menu:productos.categorias", icon: FolderTree },
       { label: "Esquemas de impuesto", href: "/esquemas-impuesto", perm: "menu:esquemas_impuesto", icon: Percent },
       { label: "Clientes", href: "/clientes", perm: "menu:clientes", icon: Users },
+      { label: "Sucursales y precios", href: "/sucursales", perm: "menu:clientes", icon: Building2 },
       { label: "Listas de precios", href: "/listas-precios", perm: "menu:listas_precios", icon: Tag },
     ],
   },
