@@ -79,6 +79,18 @@ export type ListaPrecios = {
   updated_at: string;
 };
 
+export type Precio = {
+  id: string;
+  tenant_id: string;
+  lista_id: string;
+  producto_id: string;
+  presentacion: string;
+  precio_unitario: string;
+  cantidad_minima: number;
+  vigencia_desde?: string | null;
+  vigencia_hasta?: string | null;
+};
+
 export type Cliente = {
   id: string;
   tenant_id: string;
