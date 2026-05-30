@@ -1,5 +1,41 @@
 // API response types (numeric/Decimal fields arrive as strings over JSON).
 
+// ── IAM (roles, permissions, memberships) ──
+export type Permission = {
+  id: string;
+  recurso: string;
+  accion: string;
+  vertical?: string | null;
+  descripcion?: string | null;
+};
+
+export type Role = {
+  id: string;
+  tenant_id?: string | null;
+  nombre: string;
+  vertical?: string | null;
+  descripcion?: string | null;
+  es_preset: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type RoleDetail = Role & { permissions: string[] };
+
+export type Membership = {
+  id: string;
+  tenant_id: string;
+  user_id: string;
+  role_id: string;
+  active: boolean;
+  acceso_todas_sucursales: boolean;
+  created_at: string;
+  updated_at: string;
+  user_email?: string | null;
+  user_full_name?: string | null;
+  role_nombre?: string | null;
+};
+
 export type Categoria = {
   id: string;
   tenant_id: string;
