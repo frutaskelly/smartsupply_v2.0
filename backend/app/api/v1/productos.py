@@ -32,6 +32,34 @@ def _validate_fks(db: Session, *, categoria_id, esquema_impuesto_id) -> None:
     ensure_fk(db, EsquemaImpuesto, esquema_impuesto_id, "esquema_impuesto_id")
 
 
+def _next_sku(db: Session) -> str:
+    """Next 8-digit sequential SKU for the tenant. Only fully-numeric existing
+    SKUs participate in the sequence (legacy alphanumeric SKUs are ignored)."""
+    mx = 0
+    rows = (
+        db.query(Producto.sku)
+        .filter(Producto.sku.op("~")("^[0-9]+$"))
+        .all()
+    )
+    for (sku,) in rows:
+        try:
+            mx = max(mx, int(sku))
+        except (TypeError, ValueError):
+            pass
+    return f"{mx + 1:08d}"
+
+
+def _similar_filter(query, term: str):
+    """Match a term against nombre, sku, descripción y sinónimos (ilike)."""
+    like = f"%{term}%"
+    return query.filter(
+        Producto.nombre.ilike(like)
+        | Producto.sku.ilike(like)
+        | Producto.descripcion.ilike(like)
+        | func.array_to_string(Producto.sinonimos, " ").ilike(like)
+    )
+
+
 @router.get("", response_model=Page[ProductoOut])
 def list_productos(
     q: Optional[str] = Query(default=None, max_length=254),
@@ -44,14 +72,29 @@ def list_productos(
 ):
     query = db.query(Producto).filter(Producto.deleted_at.is_(None))
     if q:
-        like = f"%{q}%"
-        query = query.filter(Producto.nombre.ilike(like) | Producto.sku.ilike(like))
+        query = _similar_filter(query, q.strip())
     if categoria_id is not None:
         query = query.filter(Producto.categoria_id == categoria_id)
     if activo is not None:
         query = query.filter(Producto.activo.is_(activo))
     query = query.order_by(Producto.nombre.asc())
     return paginate(query, ProductoOut, limit, offset)
+
+
+@router.get("/similares", response_model=list[ProductoOut])
+def productos_similares(
+    nombre: str = Query(min_length=2, max_length=254),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """Posibles duplicados: productos cuyo nombre/sinónimos coinciden. Se llama
+    antes de crear para evitar dar de alta dos veces el mismo bien (jitomate vs
+    tomate). Declarado antes de /{producto_id} para no capturarse como UUID."""
+    query = _similar_filter(
+        db.query(Producto).filter(Producto.deleted_at.is_(None)), nombre.strip()
+    )
+    rows = query.order_by(Producto.nombre.asc()).limit(10).all()
+    return [ProductoOut.model_validate(r) for r in rows]
 
 
 @router.post("", response_model=ProductoOut, status_code=status.HTTP_201_CREATED)
@@ -65,7 +108,10 @@ def create_producto(
         categoria_id=payload.categoria_id,
         esquema_impuesto_id=payload.esquema_impuesto_id,
     )
-    obj = Producto(**payload.model_dump(), tenant_id=ctx.tenant_id)
+    data = payload.model_dump()
+    if not (data.get("sku") or "").strip():
+        data["sku"] = _next_sku(db)   # auto-generate when blank
+    obj = Producto(**data, tenant_id=ctx.tenant_id)
     db.add(obj)
     flush_or_conflict(db, detail=_DUP)
     db.refresh(obj)

@@ -43,7 +43,8 @@ class ProductoBase(BaseModel):
 
 
 class ProductoCreate(ProductoBase):
-    pass
+    # SKU is optional on create — leave blank to auto-generate an 8-digit code.
+    sku: Optional[str] = Field(default=None, max_length=50)
 
 
 class ProductoUpdate(BaseModel):
