@@ -24,7 +24,9 @@ from app.models import (
     Almacen,
     CategoriaProducto,
     EsquemaImpuesto,
+    ListaPrecios,
     LoteInventario,
+    Precio,
     Producto,
     Tenant,
 )
@@ -53,6 +55,10 @@ CATEGORIAS = [
 ]
 
 ALMACEN = ("BG-CENTRAL", "Bodega Central")
+
+# Listas default (nivel de venta). UNICO es la base/pública del resolutor.
+LISTAS = [("UNICO", "Precio único"), ("MENUDEO", "Menudeo"), ("MAYOREO", "Mayoreo")]
+MARKUP_BASE = Decimal("1.30")   # precio público sembrado = costo × 1.30
 
 
 def P(sku, nombre, fam, esq, base, pres, clave, usat, costo, stock, *,
@@ -150,7 +156,7 @@ def main() -> None:
         tid = tenant.id
     print(f"Sembrando catálogo en tenant '{args.slug}' ({tid})")
 
-    n = {"esq": 0, "cat": 0, "prod": 0, "lote": 0}
+    n = {"esq": 0, "cat": 0, "prod": 0, "lote": 0, "lista": 0, "precio": 0}
     with tenant_session(tid) as db:
         # esquemas
         esq_id, esq_rate = {}, {}
@@ -181,35 +187,59 @@ def main() -> None:
             alm = Almacen(tenant_id=tid, codigo=ALMACEN[0], nombre=ALMACEN[1])
             db.add(alm); db.flush()
 
-        # productos + inventario
+        # listas de precios default (UNICO = base/público del resolutor)
+        lista_id = {}
+        for codigo, nombre in LISTAS:
+            l = db.query(ListaPrecios).filter(ListaPrecios.codigo == codigo).one_or_none()
+            if l is None:
+                l = ListaPrecios(tenant_id=tid, codigo=codigo, nombre=nombre)
+                db.add(l); db.flush(); n["lista"] += 1
+            lista_id[codigo] = l.id
+
+        # productos + inventario + precio público base (lista UNICO)
         for p in PRODUCTOS:
-            existing = db.query(Producto).filter(Producto.sku == p["sku"]).one_or_none()
-            if existing is not None:
-                continue
-            iva, ieps = esq_rate[p["esq"]]
-            prod = Producto(
-                tenant_id=tid, sku=p["sku"], nombre=p["nombre"],
-                categoria_id=cat_id[p["fam"]], esquema_impuesto_id=esq_id[p["esq"]],
-                clave_sat=p["clave"], unidad_sat=p["usat"], objeto_imp="02",
-                iva_tasa=iva, ieps_tasa=ieps,
-                unidad_base=p["base"], presentaciones=p["pres"], presentacion_default=p["base"],
-                peso_variable=p["pv"], contenido_litros=(Decimal(str(p["litros"])) if p["litros"] is not None else None),
-                perecedero=p["per"], cold_chain=p["cold"],
-                requiere_lote=p["lote"], requiere_caducidad=bool(p["cad"]),
-                sinonimos=p["sinos"], activo=True,
+            prod = db.query(Producto).filter(Producto.sku == p["sku"]).one_or_none()
+            if prod is None:
+                iva, ieps = esq_rate[p["esq"]]
+                prod = Producto(
+                    tenant_id=tid, sku=p["sku"], nombre=p["nombre"],
+                    categoria_id=cat_id[p["fam"]], esquema_impuesto_id=esq_id[p["esq"]],
+                    clave_sat=p["clave"], unidad_sat=p["usat"], objeto_imp="02",
+                    iva_tasa=iva, ieps_tasa=ieps,
+                    unidad_base=p["base"], presentaciones=p["pres"], presentacion_default=p["base"],
+                    peso_variable=p["pv"], contenido_litros=(Decimal(str(p["litros"])) if p["litros"] is not None else None),
+                    perecedero=p["per"], cold_chain=p["cold"],
+                    requiere_lote=p["lote"], requiere_caducidad=bool(p["cad"]),
+                    sinonimos=p["sinos"], activo=True,
+                )
+                db.add(prod); db.flush(); n["prod"] += 1
+                cad = date.fromisoformat(p["cad"]) if p["cad"] else None
+                db.add(LoteInventario(
+                    tenant_id=tid, producto_id=prod.id, almacen_id=alm.id,
+                    numero_lote=None, fecha_caducidad=cad,
+                    cantidad_inicial=p["stock"], cantidad_disponible=p["stock"],
+                    cantidad_reservada=Decimal("0"), costo_unitario=p["costo"],
+                ))
+                n["lote"] += 1
+
+            existe = (
+                db.query(Precio).filter(
+                    Precio.lista_id == lista_id["UNICO"],
+                    Precio.producto_id == prod.id,
+                    Precio.presentacion == p["base"],
+                ).first()
             )
-            db.add(prod); db.flush(); n["prod"] += 1
+            if existe is None:
+                db.add(Precio(
+                    tenant_id=tid, lista_id=lista_id["UNICO"], producto_id=prod.id,
+                    presentacion=p["base"],
+                    precio_unitario=(p["costo"] * MARKUP_BASE).quantize(Decimal("0.01")),
+                    cantidad_minima=1,
+                ))
+                n["precio"] += 1
 
-            cad = date.fromisoformat(p["cad"]) if p["cad"] else None
-            db.add(LoteInventario(
-                tenant_id=tid, producto_id=prod.id, almacen_id=alm.id,
-                numero_lote=None, fecha_caducidad=cad,
-                cantidad_inicial=p["stock"], cantidad_disponible=p["stock"],
-                cantidad_reservada=Decimal("0"), costo_unitario=p["costo"],
-            ))
-            n["lote"] += 1
-
-    print(f"  esquemas={n['esq']} categorías={n['cat']} productos={n['prod']} lotes={n['lote']}")
+    print(f"  esquemas={n['esq']} categorías={n['cat']} listas={n['lista']} "
+          f"productos={n['prod']} lotes={n['lote']} precios={n['precio']}")
     print("Listo (idempotente — vuelve a correr sin duplicar).")
 
 

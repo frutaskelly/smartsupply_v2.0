@@ -20,11 +20,13 @@ from .api.v1 import (
     memberships,
     ordenes_compra,
     permissions,
+    precios,
     productos,
     proveedores,
     remisiones,
     roles,
     sat,
+    sucursales,
 )
 
 logging.basicConfig(level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO))
@@ -91,3 +93,6 @@ app.include_router(sat.router, prefix="/api/v1")
 app.include_router(roles.router, prefix="/api/v1")
 app.include_router(permissions.router, prefix="/api/v1")
 app.include_router(memberships.router, prefix="/api/v1")
+# precios v2 — sucursales + cotización + overrides
+app.include_router(sucursales.router, prefix="/api/v1")
+app.include_router(precios.router, prefix="/api/v1")
