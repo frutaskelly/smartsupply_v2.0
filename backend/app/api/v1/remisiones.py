@@ -28,7 +28,9 @@ from ...models import (
     LoteInventario,
     Producto,
     Remision,
+    Sucursal,
 )
+from ...services.precios import resolver_precio
 from ...schemas.common import Page
 from ...schemas.remision import (
     ConfirmarRemisionIn,
@@ -93,6 +95,10 @@ def create_remision(
     ensure_fk(db, Cliente, payload.cliente_facturacion_id, "cliente_facturacion_id")
     ensure_fk(db, Almacen, payload.almacen_id, "almacen_id")
     ensure_fk(db, ListaPrecios, payload.lista_precios_id, "lista_precios_id")
+    if payload.sucursal_id is not None:
+        suc = get_or_404(db, Sucursal, payload.sucursal_id)
+        if suc.cliente_id != payload.cliente_facturacion_id:
+            raise HTTPException(status_code=422, detail="La sucursal no pertenece al cliente de la remisión")
     for ln in payload.lineas:
         ensure_fk(db, Producto, ln.producto_id, "producto_id")
 
@@ -101,6 +107,7 @@ def create_remision(
         folio_interno=_next_folio(db),
         cliente_facturacion_id=payload.cliente_facturacion_id,
         almacen_id=payload.almacen_id,
+        sucursal_id=payload.sucursal_id,
         lista_precios_id=payload.lista_precios_id,
         fecha_remision=payload.fecha_remision or date.today(),
         fecha_entrega=payload.fecha_entrega,
@@ -117,7 +124,21 @@ def create_remision(
 
     subtotal = _ZERO
     for i, ln in enumerate(payload.lineas, start=1):
-        importe = ln.cantidad_solicitada * ln.precio_unitario
+        # Precio: manual si se envía; si no, se resuelve por cliente/sucursal/volumen.
+        precio = ln.precio_unitario
+        if precio is None:
+            res = resolver_precio(
+                db, producto_id=ln.producto_id, presentacion=ln.presentacion,
+                cantidad=ln.cantidad_solicitada,
+                cliente_id=payload.cliente_facturacion_id, sucursal_id=payload.sucursal_id,
+            )
+            if not res or res.get("precio") is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"No se encontró precio para el producto de la línea {i}; indícalo manualmente",
+                )
+            precio = res["precio"]
+        importe = ln.cantidad_solicitada * precio
         subtotal += importe
         db.add(LineaRemision(
             tenant_id=ctx.tenant_id,
@@ -126,7 +147,7 @@ def create_remision(
             producto_id=ln.producto_id,
             presentacion=ln.presentacion,
             cantidad_solicitada=ln.cantidad_solicitada,
-            precio_unitario=ln.precio_unitario,
+            precio_unitario=precio,
             importe=importe,
             notas=ln.notas,
         ))

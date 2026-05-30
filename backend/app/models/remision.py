@@ -44,6 +44,7 @@ class Remision(Base, TimestampMixin, SoftDeleteMixin):
         UUID(as_uuid=True), ForeignKey("clientes.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     almacen_id = Column(UUID(as_uuid=True), ForeignKey("almacenes.id", ondelete="SET NULL"))
+    sucursal_id = Column(UUID(as_uuid=True), ForeignKey("sucursales.id", ondelete="SET NULL"))
     lista_precios_id = Column(UUID(as_uuid=True), ForeignKey("listas_precios.id", ondelete="SET NULL"))
     fecha_remision = Column(Date, nullable=False, server_default=text("CURRENT_DATE"))
     fecha_entrega = Column(Date)

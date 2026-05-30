@@ -13,7 +13,7 @@ from app.models import Almacen, Cliente, Membership, Producto, Role, Tenant, Use
 
 _PURGE = (
     "movimientos_inventario", "mermas", "lineas_remision", "remisiones",
-    "lotes_inventario", "productos", "almacenes", "clientes",
+    "lotes_inventario", "precios", "listas_precios", "productos", "almacenes", "clientes",
 )
 
 
@@ -164,6 +164,30 @@ def test_confirm_with_presentation_reserves_base_units(client, env, auth_as):
     row2 = _row()
     assert float(row2["disponible"]) == 100.0
     assert float(row2["reservada"]) == 0.0
+
+
+def test_auto_precio_desde_lista(client, env, auth_as):
+    """Sin precio en la línea → se resuelve desde la lista base (UNICO)."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    lista = client.post("/api/v1/listas-precios", headers=h, json={"codigo": "UNICO", "nombre": "Único"}).json()
+    client.post(f"/api/v1/listas-precios/{lista['id']}/precios", headers=h,
+                json={"producto_id": env["prod_a"], "precio_unitario": "7.50", "cantidad_minima": 1})
+    r = client.post("/api/v1/remisiones", headers=h, json={
+        "cliente_facturacion_id": env["cli_a"], "almacen_id": env["alm_a"],
+        "lineas": [{"producto_id": env["prod_a"], "cantidad_solicitada": "4"}]})  # sin precio_unitario
+    assert r.status_code == 201, r.text
+    rem = r.json()
+    assert float(rem["lineas"][0]["precio_unitario"]) == 7.50
+    assert float(rem["subtotal"]) == 30.0  # 4 × 7.50
+
+
+def test_auto_precio_sin_precio_disponible_422(client, env, auth_as):
+    """Sin precio en línea ni lista ni override → 422 (pide precio manual)."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    r = client.post("/api/v1/remisiones", headers=h, json={
+        "cliente_facturacion_id": env["cli_a"], "almacen_id": env["alm_a"],
+        "lineas": [{"producto_id": env["prod_a"], "cantidad_solicitada": "1"}]})
+    assert r.status_code == 422
 
 
 def test_confirm_with_real_weight_catch_weight(client, env, auth_as):

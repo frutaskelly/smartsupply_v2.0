@@ -16,7 +16,8 @@ class LineaRemisionCreate(BaseModel):
     producto_id: uuid.UUID
     presentacion: str = Field(default="KILO", max_length=20)
     cantidad_solicitada: Decimal = Field(gt=0)
-    precio_unitario: Decimal = Field(ge=0)
+    # Opcional: si se omite, se resuelve automáticamente (cliente/sucursal/volumen).
+    precio_unitario: Optional[Decimal] = Field(default=None, ge=0)
     notas: Optional[str] = None
 
 
@@ -36,6 +37,7 @@ class LineaRemisionOut(ORMModel):
 class RemisionCreate(BaseModel):
     cliente_facturacion_id: uuid.UUID
     almacen_id: Optional[uuid.UUID] = None
+    sucursal_id: Optional[uuid.UUID] = None
     lista_precios_id: Optional[uuid.UUID] = None
     fecha_remision: Optional[date] = None
     fecha_entrega: Optional[date] = None
@@ -61,6 +63,7 @@ class RemisionOut(ORMModel):
     folio_interno: str
     cliente_facturacion_id: uuid.UUID
     almacen_id: Optional[uuid.UUID] = None
+    sucursal_id: Optional[uuid.UUID] = None
     lista_precios_id: Optional[uuid.UUID] = None
     fecha_remision: date
     fecha_entrega: Optional[date] = None
