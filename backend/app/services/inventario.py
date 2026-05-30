@@ -21,24 +21,45 @@ ONE = Decimal("1")
 _Q = Decimal("0.0001")
 
 
+def _presentacion_entry(producto: Optional[Producto], presentacion: Optional[str]):
+    """Raw `presentaciones` entry for a presentation. Supports both the legacy
+    shape `{nombre: factor}` and the rich shape `{nombre: {factor, sat, estimado}}`.
+    Returns None when blank/unknown."""
+    if not presentacion:
+        return None
+    pres = (getattr(producto, "presentaciones", None) or {})
+    return pres.get(presentacion)
+
+
 def presentacion_factor(producto: Optional[Producto], presentacion: Optional[str]) -> Decimal:
     """Base units contained in one unit of `presentacion` for this product.
 
     The base presentation — and any blank or unknown presentation — is 1:1, so
     documents that don't specify a presentation behave exactly as before. A
-    non-positive or non-numeric factor is treated as 1 (defensive).
+    non-positive or non-numeric factor is treated as 1 (defensive). Accepts both
+    the legacy `{nombre: factor}` and rich `{nombre: {factor, ...}}` shapes.
     """
-    if not presentacion:
-        return ONE
-    pres = (getattr(producto, "presentaciones", None) or {})
-    raw = pres.get(presentacion)
+    raw = _presentacion_entry(producto, presentacion)
     if raw is None:
         return ONE
+    val = raw.get("factor") if isinstance(raw, dict) else raw
+    if val is None:
+        return ONE
     try:
-        factor = Decimal(str(raw))
+        factor = Decimal(str(val))
     except (ArithmeticError, ValueError):
         return ONE
     return factor if factor > 0 else ONE
+
+
+def presentacion_sat(producto: Optional[Producto], presentacion: Optional[str]) -> Optional[str]:
+    """The CFDI clave_unidad (unidad SAT) for a presentation. When the rich shape
+    carries a `sat`, it wins (so the same product can bill KGM por kilo y H87 por
+    pieza); otherwise it falls back to the product's `unidad_sat`."""
+    raw = _presentacion_entry(producto, presentacion)
+    if isinstance(raw, dict) and raw.get("sat"):
+        return str(raw["sat"])
+    return getattr(producto, "unidad_sat", None)
 
 
 def weighted_cost(qty_old: Decimal, cost_old: Decimal, qty_in: Decimal, cost_in: Decimal) -> Decimal:
