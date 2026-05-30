@@ -71,6 +71,31 @@ export type Cliente = {
   updated_at: string;
 };
 
+export type ExistenciaRow = {
+  producto_id: string;
+  almacen_id: string;
+  disponible: string;
+  reservada: string;
+  costo_promedio: string;
+  valor: string;
+};
+
+export type Movimiento = {
+  id: string;
+  tenant_id: string;
+  tipo: string;
+  fecha: string;
+  lote_id: string;
+  cantidad: string;
+  costo_unitario?: string | null;
+  ref_tipo?: string | null;
+  ref_id?: string | null;
+  motivo?: string | null;
+  notas?: string | null;
+  created_by?: string | null;
+  created_at: string;
+};
+
 export type Proveedor = {
   id: string;
   tenant_id: string;
