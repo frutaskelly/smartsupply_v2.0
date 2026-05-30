@@ -196,7 +196,7 @@ def main() -> None:
                 peso_variable=p["pv"], contenido_litros=(Decimal(str(p["litros"])) if p["litros"] is not None else None),
                 perecedero=p["per"], cold_chain=p["cold"],
                 requiere_lote=p["lote"], requiere_caducidad=bool(p["cad"]),
-                costo_promedio=p["costo"], sinonimos=p["sinos"], activo=True,
+                sinonimos=p["sinos"], activo=True,
             )
             db.add(prod); db.flush(); n["prod"] += 1
 

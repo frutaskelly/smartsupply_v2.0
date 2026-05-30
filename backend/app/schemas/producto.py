@@ -36,7 +36,6 @@ class ProductoBase(BaseModel):
     requiere_lote: bool = False
     requiere_caducidad: bool = False
     vida_util_dias: Optional[int] = Field(default=None, ge=0)
-    costo_promedio: Decimal = Field(default=Decimal("0"), ge=0)
     sinonimos: list[str] = Field(default_factory=list)
     activo: bool = True
     custom_fields: dict = Field(default_factory=dict)
@@ -71,7 +70,6 @@ class ProductoUpdate(BaseModel):
     requiere_lote: Optional[bool] = None
     requiere_caducidad: Optional[bool] = None
     vida_util_dias: Optional[int] = Field(default=None, ge=0)
-    costo_promedio: Optional[Decimal] = Field(default=None, ge=0)
     sinonimos: Optional[list[str]] = None
     activo: Optional[bool] = None
     custom_fields: Optional[dict] = None

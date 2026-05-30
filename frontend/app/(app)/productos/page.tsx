@@ -12,7 +12,6 @@ import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ApiError, apiFetch } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
-import { fmtMoney } from "@/lib/format";
 import { useMutation, useResource, type Page } from "@/lib/hooks";
 import { useToast } from "@/components/ui/Toast";
 import type { Categoria, Producto } from "@/lib/types";
@@ -29,7 +28,6 @@ type FormState = {
   categoria_id: string;
   clave_sat: string;
   unidad_sat: string;
-  costo_promedio: string;
   unidad_base: string;
   presentaciones: PresRow[];
   activo: boolean;
@@ -45,7 +43,6 @@ function emptyForm(): FormState {
     categoria_id: "",
     clave_sat: "01010101",
     unidad_sat: "KGM",
-    costo_promedio: "0",
     unidad_base: "KILO",
     presentaciones: [{ nombre: "KILO", factor: "1" }],
     activo: true,
@@ -66,7 +63,6 @@ function toForm(p: Producto): FormState {
     categoria_id: p.categoria_id ?? "",
     clave_sat: p.clave_sat,
     unidad_sat: p.unidad_sat,
-    costo_promedio: p.costo_promedio,
     unidad_base: p.unidad_base ?? "KILO",
     presentaciones: rows.length ? rows : [{ nombre: p.unidad_base ?? "KILO", factor: "1" }],
     activo: p.activo,
@@ -182,7 +178,6 @@ export default function ProductosPage() {
       categoria_id: form.categoria_id || null,
       clave_sat: form.clave_sat.trim(),
       unidad_sat: form.unidad_sat.trim(),
-      costo_promedio: form.costo_promedio || "0",
       unidad_base: unidadBase,
       presentaciones,
       activo: form.activo,
@@ -221,7 +216,6 @@ export default function ProductosPage() {
     { header: "Nombre", cell: (p) => p.nombre },
     { header: "Categoría", cell: (p) => (p.categoria_id ? catName[p.categoria_id] ?? "—" : "—") },
     { header: "Clave SAT", cell: (p) => <span className="text-muted">{p.clave_sat}</span> },
-    { header: "Costo prom.", cell: (p) => fmtMoney(p.costo_promedio), className: "text-right" },
     {
       header: "Estado",
       cell: (p) => <Badge tone={p.activo ? "success" : "muted"}>{p.activo ? "Activo" : "Inactivo"}</Badge>,
@@ -361,14 +355,6 @@ export default function ProductosPage() {
                   </option>
                 ))}
               </Select>
-            </Field>
-            <Field label="Costo promedio">
-              <Input
-                type="number"
-                step="0.0001"
-                value={form.costo_promedio}
-                onChange={(e) => setForm({ ...form, costo_promedio: e.target.value })}
-              />
             </Field>
             <div className="sm:col-span-2">
               <Button type="button" variant="secondary" onClick={suggestSat} disabled={suggesting}>

@@ -201,7 +201,6 @@ export type Producto = {
   requiere_lote: boolean;
   requiere_caducidad: boolean;
   vida_util_dias?: number | null;
-  costo_promedio: string;
   sinonimos: string[];
   activo: boolean;
   custom_fields: Record<string, unknown>;

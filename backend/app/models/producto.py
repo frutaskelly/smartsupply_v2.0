@@ -81,7 +81,8 @@ class Producto(Base, TimestampMixin, SoftDeleteMixin):
     requiere_lote = Column(Boolean, nullable=False, server_default="false")
     requiere_caducidad = Column(Boolean, nullable=False, server_default="false")
     vida_util_dias = Column(Integer)
-    costo_promedio = Column(Numeric(18, 4), nullable=False, server_default="0")
+    # NB: el costo NO vive aquí — su verdad está en lotes_inventario.costo_unitario
+    # (promedio ponderado por lote) y se consulta vía existencias por almacén.
 
     sinonimos = Column(ARRAY(Text), nullable=False, server_default="{}")
     activo = Column(Boolean, nullable=False, server_default="true")
