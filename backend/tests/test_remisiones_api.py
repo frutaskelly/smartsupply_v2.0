@@ -47,11 +47,17 @@ def env(db_engine):
 
         cli = Cliente(tenant_id=tenant_a.id, codigo="CL1", legal_name="Cliente 1", rfc="XAXX010101000")
         prod = Producto(tenant_id=tenant_a.id, sku="R-P", nombre="Prod R", clave_sat="01010101", unidad_sat="KGM")
+        prod_bulto = Producto(
+            tenant_id=tenant_a.id, sku="R-PB", nombre="Prod Bulto R",
+            clave_sat="50300000", unidad_sat="KGM",
+            unidad_base="KILO", presentaciones={"KILO": 1, "BULTO": 20},
+        )
         alm = Almacen(tenant_id=tenant_a.id, codigo="R-BG", nombre="Bodega R")
-        db.add_all([cli, prod, alm]); db.flush()
+        db.add_all([cli, prod, alm, prod_bulto]); db.flush()
         db.commit()
         yield {"admin_a": admin_a, "tomador_a": tomador_a, "admin_b": admin_b,
-               "cli_a": str(cli.id), "prod_a": str(prod.id), "alm_a": str(alm.id)}
+               "cli_a": str(cli.id), "prod_a": str(prod.id), "alm_a": str(alm.id),
+               "prod_bulto_a": str(prod_bulto.id)}
     finally:
         for table in _PURGE:
             for tid in created["tenants"]:
@@ -128,6 +134,34 @@ def test_confirm_reserves_then_cancel_releases(client, env, auth_as):
     x = client.post(f"/api/v1/remisiones/{rem_id}/cancelar", headers=h)
     assert x.status_code == 200 and x.json()["estado"] == "CANCELADA"
     row2 = _disp(client, h, env)
+    assert float(row2["disponible"]) == 100.0
+    assert float(row2["reservada"]) == 0.0
+
+
+def test_confirm_with_presentation_reserves_base_units(client, env, auth_as):
+    """Selling in BULTO (1 BULTO = 20 KILO) reserves the base-unit equivalent:
+    100 KILO in stock, sell 2 BULTO → 40 KILO reserved. Cancel releases 40."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    pid = env["prod_bulto_a"]
+    client.post("/api/v1/inventario/movimientos", headers=h, json={
+        "tipo": "ENTRADA_COMPRA", "producto_id": pid, "almacen_id": env["alm_a"],
+        "cantidad": "100", "costo_unitario": "4"})
+    rem_id = client.post("/api/v1/remisiones", headers=h, json={
+        "cliente_facturacion_id": env["cli_a"], "almacen_id": env["alm_a"],
+        "lineas": [{"producto_id": pid, "cantidad_solicitada": "2",
+                    "precio_unitario": "150", "presentacion": "BULTO"}]}).json()["id"]
+
+    def _row():
+        rows = client.get("/api/v1/inventario/existencias", headers=h, params={"producto_id": pid}).json()
+        return next(r for r in rows if r["almacen_id"] == env["alm_a"])
+
+    assert client.post(f"/api/v1/remisiones/{rem_id}/confirmar", headers=h).status_code == 200
+    row = _row()
+    assert float(row["disponible"]) == 60.0   # 100 − (2 × 20)
+    assert float(row["reservada"]) == 40.0
+
+    assert client.post(f"/api/v1/remisiones/{rem_id}/cancelar", headers=h).status_code == 200
+    row2 = _row()
     assert float(row2["disponible"]) == 100.0
     assert float(row2["reservada"]) == 0.0
 

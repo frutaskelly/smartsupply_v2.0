@@ -47,13 +47,19 @@ def env(db_engine):
 
         prov = Proveedor(tenant_id=tenant_a.id, codigo="P1", nombre="Proveedor 1")
         prod = Producto(tenant_id=tenant_a.id, sku="OC-P", nombre="Prod OC", clave_sat="01010101", unidad_sat="KGM")
+        prod_bulto = Producto(
+            tenant_id=tenant_a.id, sku="OC-PB", nombre="Prod Bulto",
+            clave_sat="50300000", unidad_sat="KGM",
+            unidad_base="KILO", presentaciones={"KILO": 1, "BULTO": 20},
+        )
         alm = Almacen(tenant_id=tenant_a.id, codigo="OC-BG", nombre="Bodega OC")
-        db.add_all([prov, prod, alm]); db.flush()
+        db.add_all([prov, prod, alm, prod_bulto]); db.flush()
         db.commit()
 
         yield {
             "admin_a": admin_a, "tomador_a": tomador_a, "admin_b": admin_b,
             "prov_a": str(prov.id), "prod_a": str(prod.id), "alm_a": str(alm.id),
+            "prod_bulto_a": str(prod_bulto.id),
         }
     finally:
         for table in _PURGE:
@@ -158,6 +164,30 @@ def test_partial_receive(client, env, auth_as):
     assert rest.json()["estado"] == "RECIBIDA"
     ex = client.get("/api/v1/inventario/existencias", headers=h, params={"producto_id": env["prod_a"]}).json()
     assert float(next(x for x in ex if x["almacen_id"] == env["alm_a"])["disponible"]) == 100.0
+
+
+def test_receive_with_presentation_converts_to_base_units(client, env, auth_as):
+    """Buying in BULTO (1 BULTO = 20 KILO) stocks inventory in base units and
+    costs it per base unit: 2 BULTO @ $100 → 40 KILO @ $5/KILO. The PO line
+    keeps its own units (cantidad_recibida is in BULTO)."""
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+    oc = client.post("/api/v1/ordenes-compra", headers=h, json={
+        "proveedor_id": env["prov_a"], "almacen_destino_id": env["alm_a"],
+        "lineas": [{"producto_id": env["prod_bulto_a"], "cantidad_solicitada": "2",
+                    "precio_unitario": "100", "presentacion": "BULTO"}]}).json()
+    oc_id = oc["id"]
+    for nuevo in ("ENVIADA", "ACEPTADA", "EN_TRANSITO"):
+        client.post(f"/api/v1/ordenes-compra/{oc_id}/transition", headers=h, json={"nuevo_estado": nuevo})
+
+    rec = client.post(f"/api/v1/ordenes-compra/{oc_id}/recibir", headers=h, json={})
+    assert rec.status_code == 200, rec.text
+    assert float(rec.json()["lineas"][0]["cantidad_recibida"]) == 2.0  # in BULTO
+
+    ex = client.get("/api/v1/inventario/existencias", headers=h,
+                    params={"producto_id": env["prod_bulto_a"]}).json()
+    row = next(x for x in ex if x["almacen_id"] == env["alm_a"])
+    assert float(row["disponible"]) == 40.0          # 2 × 20 base units
+    assert float(row["costo_promedio"]) == 5.0        # 100 / 20 per base unit
 
 
 def test_tomador_cannot_touch_compras(client, env, auth_as):

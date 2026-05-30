@@ -60,6 +60,11 @@ class Producto(Base, TimestampMixin, SoftDeleteMixin):
     ieps_tasa = Column(Numeric(5, 4), nullable=False, server_default="0")
 
     # ── units / presentations ──
+    # `unidad_base` is the canonical inventory unit. `presentaciones` maps each
+    # sellable/buyable presentation to how many base units it contains, e.g.
+    # base KILO + {"KILO": 1, "BULTO": 20} → 1 BULTO = 20 KILO. Stock + costs are
+    # always stored in base units; documents convert via the factor at stock time.
+    unidad_base = Column(String(20), nullable=False, server_default="KILO")
     presentaciones = Column(JSONB, nullable=False, server_default='{"KILO": 1}')
     presentacion_default = Column(String(20), server_default="KILO")
     unidad_entrada = Column(String(20))

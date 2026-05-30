@@ -155,6 +155,7 @@ export type Producto = {
   objeto_imp: string;
   iva_tasa: string;
   ieps_tasa: string;
+  unidad_base: string;
   presentaciones: Record<string, number>;
   presentacion_default?: string | null;
   unidad_entrada?: string | null;

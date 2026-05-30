@@ -26,7 +26,7 @@ from ...schemas.orden_compra import (
     RecibirIn,
     TransitionIn,
 )
-from ...services.inventario import apply_entrada_compra
+from ...services.inventario import apply_entrada_compra, presentacion_factor
 from ._helpers import ensure_fk, flush_or_conflict, get_or_404, paginate
 
 router = APIRouter(prefix="/ordenes-compra", tags=["órdenes de compra"])
@@ -210,6 +210,12 @@ def recibir_orden(
     if not recepciones:
         raise HTTPException(status_code=422, detail="No hay cantidades por recibir")
 
+    # Products carry the presentation→base-unit factors; load them once so the
+    # receipt can convert document quantities (in presentation units) to the
+    # base units inventory is stored in.
+    prod_ids = {by_id[lid].producto_id for lid, _ in recepciones if by_id.get(lid)}
+    productos = {p.id: p for p in db.query(Producto).filter(Producto.id.in_(prod_ids)).all()}
+
     for linea_id, cantidad in recepciones:
         ln = by_id.get(linea_id)
         if ln is None:
@@ -217,10 +223,15 @@ def recibir_orden(
         pendiente = ln.cantidad_solicitada - ln.cantidad_recibida
         if cantidad > pendiente:
             raise HTTPException(status_code=422, detail="La cantidad recibida excede lo pendiente de la línea")
+        # cantidad + precio_unitario are per presentation; convert to base units
+        # for inventory, and derive the per-base-unit cost (precio / factor).
+        factor = presentacion_factor(productos.get(ln.producto_id), ln.presentacion)
+        base_qty = cantidad * factor
+        costo_base = (ln.precio_unitario / factor) if factor else ln.precio_unitario
         apply_entrada_compra(
             db, ctx.tenant_id, ctx.user_id,
             producto_id=ln.producto_id, almacen_id=almacen_id,
-            cantidad=cantidad, costo=ln.precio_unitario,
+            cantidad=base_qty, costo=costo_base,
             proveedor_id=oc.proveedor_id, orden_compra_id=oc.id,
             ref_tipo="ORDEN_COMPRA", ref_id=oc.id,
         )

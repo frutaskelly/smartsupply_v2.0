@@ -20,6 +20,8 @@ import type { Categoria, Producto } from "@/lib/types";
 const WRITE = "producto:gestionar";
 const LIMIT = 20;
 
+type PresRow = { nombre: string; factor: string };
+
 type FormState = {
   sku: string;
   nombre: string;
@@ -28,6 +30,8 @@ type FormState = {
   clave_sat: string;
   unidad_sat: string;
   costo_promedio: string;
+  unidad_base: string;
+  presentaciones: PresRow[];
   activo: boolean;
   perecedero: boolean;
   requiere_lote: boolean;
@@ -42,6 +46,8 @@ function emptyForm(): FormState {
     clave_sat: "01010101",
     unidad_sat: "KGM",
     costo_promedio: "0",
+    unidad_base: "KILO",
+    presentaciones: [{ nombre: "KILO", factor: "1" }],
     activo: true,
     perecedero: false,
     requiere_lote: false,
@@ -49,6 +55,10 @@ function emptyForm(): FormState {
 }
 
 function toForm(p: Producto): FormState {
+  const rows = Object.entries(p.presentaciones ?? {}).map(([nombre, factor]) => ({
+    nombre,
+    factor: String(factor),
+  }));
   return {
     sku: p.sku,
     nombre: p.nombre,
@@ -57,6 +67,8 @@ function toForm(p: Producto): FormState {
     clave_sat: p.clave_sat,
     unidad_sat: p.unidad_sat,
     costo_promedio: p.costo_promedio,
+    unidad_base: p.unidad_base ?? "KILO",
+    presentaciones: rows.length ? rows : [{ nombre: p.unidad_base ?? "KILO", factor: "1" }],
     activo: p.activo,
     perecedero: p.perecedero,
     requiere_lote: p.requiere_lote,
@@ -150,6 +162,19 @@ export default function ProductosPage() {
       toast.error("SKU y nombre son obligatorios");
       return;
     }
+    const unidadBase = form.unidad_base.trim() || "KILO";
+    // Build the presentation→base-units map; the base unit is always 1:1.
+    const presentaciones: Record<string, number> = { [unidadBase]: 1 };
+    for (const r of form.presentaciones) {
+      const nombre = r.nombre.trim();
+      if (!nombre || nombre === unidadBase) continue;
+      const factor = Number(r.factor);
+      if (!Number.isFinite(factor) || factor <= 0) {
+        toast.error(`Factor inválido para "${nombre}" (debe ser mayor a 0)`);
+        return;
+      }
+      presentaciones[nombre] = factor;
+    }
     const payload = {
       sku: form.sku.trim(),
       nombre: form.nombre.trim(),
@@ -158,6 +183,8 @@ export default function ProductosPage() {
       clave_sat: form.clave_sat.trim(),
       unidad_sat: form.unidad_sat.trim(),
       costo_promedio: form.costo_promedio || "0",
+      unidad_base: unidadBase,
+      presentaciones,
       activo: form.activo,
       perecedero: form.perecedero,
       requiere_lote: form.requiere_lote,
@@ -354,6 +381,84 @@ export default function ProductosPage() {
             <Field label="Unidad SAT" hint="p.ej. KGM, H87">
               <Input value={form.unidad_sat} onChange={(e) => setForm({ ...form, unidad_sat: e.target.value })} />
             </Field>
+
+            <div className="sm:col-span-2 rounded-lg border border-border bg-surface-2/40 p-3">
+              <Field label="Unidad base" hint="Unidad de inventario — todo el stock se guarda en esta unidad (p.ej. KILO, PIEZA)">
+                <Input
+                  value={form.unidad_base}
+                  onChange={(e) => setForm({ ...form, unidad_base: e.target.value.toUpperCase() })}
+                  className="max-w-[12rem]"
+                />
+              </Field>
+              <div className="mb-1 mt-3 flex items-center justify-between">
+                <span className="text-sm font-medium">Presentaciones</span>
+                <span className="text-xs text-muted">Factor = unidades base por presentación</span>
+              </div>
+              <div className="space-y-2">
+                {form.presentaciones.map((r, i) => {
+                  const isBase =
+                    r.nombre.trim().toUpperCase() === form.unidad_base.trim().toUpperCase();
+                  return (
+                    <div key={i} className="flex items-center gap-2">
+                      <Input
+                        placeholder="Nombre (p.ej. BULTO)"
+                        value={r.nombre}
+                        onChange={(e) => {
+                          const next = [...form.presentaciones];
+                          next[i] = { ...next[i], nombre: e.target.value.toUpperCase() };
+                          setForm({ ...form, presentaciones: next });
+                        }}
+                        className="flex-1"
+                      />
+                      <Input
+                        type="number"
+                        step="0.0001"
+                        min="0"
+                        placeholder="Factor"
+                        value={isBase ? "1" : r.factor}
+                        disabled={isBase}
+                        onChange={(e) => {
+                          const next = [...form.presentaciones];
+                          next[i] = { ...next[i], factor: e.target.value };
+                          setForm({ ...form, presentaciones: next });
+                        }}
+                        className="w-28"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = form.presentaciones.filter((_, j) => j !== i);
+                          setForm({
+                            ...form,
+                            presentaciones: next.length
+                              ? next
+                              : [{ nombre: form.unidad_base, factor: "1" }],
+                          });
+                        }}
+                        className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-danger"
+                        aria-label="Quitar presentación"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+              <Button
+                type="button"
+                variant="secondary"
+                className="mt-2"
+                onClick={() =>
+                  setForm({
+                    ...form,
+                    presentaciones: [...form.presentaciones, { nombre: "", factor: "" }],
+                  })
+                }
+              >
+                <Plus size={16} /> Agregar presentación
+              </Button>
+            </div>
+
             <div className="sm:col-span-2">
               <Field label="Descripción">
                 <Textarea

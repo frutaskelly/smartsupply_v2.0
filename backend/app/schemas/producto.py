@@ -22,6 +22,7 @@ class ProductoBase(BaseModel):
     iva_tasa: Decimal = Field(default=Decimal("0"), ge=0, le=1)
     ieps_tasa: Decimal = Field(default=Decimal("0"), ge=0, le=1)
     # units / presentations
+    unidad_base: str = Field(default="KILO", max_length=20)
     presentaciones: dict = Field(default_factory=lambda: {"KILO": 1})
     presentacion_default: Optional[str] = Field(default="KILO", max_length=20)
     unidad_entrada: Optional[str] = Field(default=None, max_length=20)
@@ -53,6 +54,7 @@ class ProductoUpdate(BaseModel):
     objeto_imp: Optional[str] = Field(default=None, max_length=2)
     iva_tasa: Optional[Decimal] = Field(default=None, ge=0, le=1)
     ieps_tasa: Optional[Decimal] = Field(default=None, ge=0, le=1)
+    unidad_base: Optional[str] = Field(default=None, max_length=20)
     presentaciones: Optional[dict] = None
     presentacion_default: Optional[str] = Field(default=None, max_length=20)
     unidad_entrada: Optional[str] = Field(default=None, max_length=20)

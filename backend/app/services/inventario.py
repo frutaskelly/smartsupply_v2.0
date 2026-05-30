@@ -14,10 +14,31 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from ..models import LoteInventario, MovimientoInventario
+from ..models import LoteInventario, MovimientoInventario, Producto
 
 ZERO = Decimal("0")
+ONE = Decimal("1")
 _Q = Decimal("0.0001")
+
+
+def presentacion_factor(producto: Optional[Producto], presentacion: Optional[str]) -> Decimal:
+    """Base units contained in one unit of `presentacion` for this product.
+
+    The base presentation — and any blank or unknown presentation — is 1:1, so
+    documents that don't specify a presentation behave exactly as before. A
+    non-positive or non-numeric factor is treated as 1 (defensive).
+    """
+    if not presentacion:
+        return ONE
+    pres = (getattr(producto, "presentaciones", None) or {})
+    raw = pres.get(presentacion)
+    if raw is None:
+        return ONE
+    try:
+        factor = Decimal(str(raw))
+    except (ArithmeticError, ValueError):
+        return ONE
+    return factor if factor > 0 else ONE
 
 
 def weighted_cost(qty_old: Decimal, cost_old: Decimal, qty_in: Decimal, cost_in: Decimal) -> Decimal:

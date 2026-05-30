@@ -31,7 +31,7 @@ from ...models import (
 )
 from ...schemas.common import Page
 from ...schemas.remision import RemisionCreate, RemisionDetailOut, RemisionOut, RemisionUpdate
-from ...services.inventario import build_movimiento, resolve_lote
+from ...services.inventario import build_movimiento, presentacion_factor, resolve_lote
 from ._helpers import ensure_fk, flush_or_conflict, get_or_404, paginate
 
 router = APIRouter(prefix="/remisiones", tags=["remisiones"])
@@ -177,18 +177,25 @@ def confirmar_remision(
     if rem.almacen_id is None:
         raise HTTPException(status_code=422, detail="La remisión requiere un almacén para reservar inventario")
 
+    # Lines carry a presentation + a quantity in that presentation; reserve the
+    # equivalent in base units (the unit inventory is stored in).
+    prod_ids = {ln.producto_id for ln in rem.lineas}
+    productos = {p.id: p for p in db.query(Producto).filter(Producto.id.in_(prod_ids)).all()}
+
     for ln in rem.lineas:
+        factor = presentacion_factor(productos.get(ln.producto_id), ln.presentacion)
+        base_qty = ln.cantidad_solicitada * factor
         lote = resolve_lote(db, ctx.tenant_id, ln.producto_id, rem.almacen_id, numero_lote=None, create=False)
-        if lote is None or lote.cantidad_disponible < ln.cantidad_solicitada:
+        if lote is None or lote.cantidad_disponible < base_qty:
             raise HTTPException(
                 status_code=422,
                 detail=f"Existencia insuficiente para la línea {ln.numero_linea}",
             )
-        lote.cantidad_disponible = lote.cantidad_disponible - ln.cantidad_solicitada
-        lote.cantidad_reservada = lote.cantidad_reservada + ln.cantidad_solicitada
+        lote.cantidad_disponible = lote.cantidad_disponible - base_qty
+        lote.cantidad_reservada = lote.cantidad_reservada + base_qty
         ln.lote_id = lote.id
         db.add(build_movimiento(
-            ctx.tenant_id, ctx.user_id, lote, "SALIDA_REMISION", -ln.cantidad_solicitada,
+            ctx.tenant_id, ctx.user_id, lote, "SALIDA_REMISION", -base_qty,
             ref_tipo="REMISION", ref_id=rem.id, motivo=f"Reserva remisión {rem.folio_interno}",
         ))
 
@@ -210,6 +217,8 @@ def cancelar_remision(
         raise HTTPException(status_code=409, detail="La remisión ya está cancelada")
 
     if rem.estado == "CONFIRMADA":
+        prod_ids = {ln.producto_id for ln in rem.lineas if ln.lote_id is not None}
+        productos = {p.id: p for p in db.query(Producto).filter(Producto.id.in_(prod_ids)).all()}
         for ln in rem.lineas:
             if ln.lote_id is None:
                 continue
@@ -221,7 +230,9 @@ def cancelar_remision(
             )
             if lote is None:
                 continue
-            cantidad = ln.cantidad_solicitada
+            # release the same base-unit amount that was reserved at confirm
+            factor = presentacion_factor(productos.get(ln.producto_id), ln.presentacion)
+            cantidad = ln.cantidad_solicitada * factor
             lote.cantidad_reservada = max(_ZERO, lote.cantidad_reservada - cantidad)
             lote.cantidad_disponible = lote.cantidad_disponible + cantidad
             db.add(build_movimiento(
