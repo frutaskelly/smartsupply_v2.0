@@ -6,6 +6,7 @@ from .categoria import CategoriaProducto
 from .cliente import Cliente
 from .conversion import ConversionProducto
 from .esquema_impuesto import EsquemaImpuesto
+from .factura import Factura, LineaFactura
 from .inventario import LoteInventario, Merma, MovimientoInventario
 from .orden_compra import LineaOrdenCompra, OrdenCompra
 from .permission import Permission
@@ -42,4 +43,7 @@ __all__ = [
     "ConversionProducto",
     "Remision",
     "LineaRemision",
+    # ── Phase 6: fiscal ──
+    "Factura",
+    "LineaFactura",
 ]

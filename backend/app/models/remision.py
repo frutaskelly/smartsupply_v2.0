@@ -56,6 +56,8 @@ class Remision(Base, TimestampMixin, SoftDeleteMixin):
     total = Column(Numeric(18, 4), nullable=False, server_default="0")
     notas = Column(Text)
     nota_entrega = Column(Text)
+    # Fase 6: una factura cruza una o varias remisiones (NULL = sin facturar).
+    factura_id = Column(UUID(as_uuid=True), ForeignKey("facturas.id", ondelete="SET NULL"))
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
     updated_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
 
