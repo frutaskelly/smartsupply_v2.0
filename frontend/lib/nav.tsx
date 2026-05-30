@@ -1,8 +1,10 @@
 import {
   Boxes,
   FileText,
+  FolderTree,
   LayoutDashboard,
   Package,
+  Percent,
   Repeat,
   Shield,
   ShoppingCart,
@@ -27,6 +29,8 @@ export const NAV: NavSection[] = [
     section: "Catálogo",
     items: [
       { label: "Productos", href: "/productos", perm: "menu:productos", icon: Package },
+      { label: "Categorías", href: "/categorias", perm: "menu:productos.categorias", icon: FolderTree },
+      { label: "Esquemas de impuesto", href: "/esquemas-impuesto", perm: "menu:esquemas_impuesto", icon: Percent },
       { label: "Clientes", href: "/clientes", perm: "menu:clientes", icon: Users },
       { label: "Listas de precios", href: "/listas-precios", perm: "menu:listas_precios", icon: Tag },
     ],

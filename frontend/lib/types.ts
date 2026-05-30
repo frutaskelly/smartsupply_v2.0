@@ -13,6 +13,64 @@ export type Categoria = {
   updated_at: string;
 };
 
+export type EsquemaImpuesto = {
+  id: string;
+  tenant_id: string;
+  codigo: string;
+  nombre: string;
+  descripcion?: string | null;
+  iva_tasa: string;
+  ieps_tasa: string;
+  iva_exento: boolean;
+  retencion_iva_tasa: string;
+  retencion_isr_tasa: string;
+  activo: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ListaPrecios = {
+  id: string;
+  tenant_id: string;
+  codigo: string;
+  nombre: string;
+  status: string;
+  vigencia_desde?: string | null;
+  vigencia_hasta?: string | null;
+  moneda: string;
+  notas?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type Cliente = {
+  id: string;
+  tenant_id: string;
+  codigo?: string | null;
+  tipo: string;
+  status: string;
+  legal_name: string;
+  rfc: string;
+  regimen_fiscal?: string | null;
+  uso_cfdi_default?: string | null;
+  forma_pago_default?: string | null;
+  metodo_pago_default?: string | null;
+  domicilio_fiscal: Record<string, unknown>;
+  lista_precios_id?: string | null;
+  condiciones_pago?: string | null;
+  limite_credito: string;
+  dias_credito: number;
+  descuento_default: string;
+  config_addenda: Record<string, unknown>;
+  saldo_actual: string;
+  ventas_ytd: string;
+  ultima_venta_at?: string | null;
+  ultimo_pago_at?: string | null;
+  custom_fields: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
 export type Producto = {
   id: string;
   tenant_id: string;
