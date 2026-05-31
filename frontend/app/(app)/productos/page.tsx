@@ -19,6 +19,29 @@ import type { Categoria, Producto } from "@/lib/types";
 const WRITE = "producto:gestionar";
 const LIMIT = 20;
 
+// Unidades base más comunes (unidad interna de inventario).
+const UNIDADES_BASE = [
+  "KILO", "PIEZA", "LITRO", "GRAMO", "MILILITRO", "CAJA", "BULTO", "COSTAL",
+  "PAQUETE", "MANOJO", "MALLA", "REJA", "DOCENA", "ATADO",
+];
+
+// Unidades SAT (c_ClaveUnidad) frecuentes, con su nombre.
+const UNIDADES_SAT: { code: string; nombre: string }[] = [
+  { code: "KGM", nombre: "Kilogramo" },
+  { code: "GRM", nombre: "Gramo" },
+  { code: "LTR", nombre: "Litro" },
+  { code: "MLT", nombre: "Mililitro" },
+  { code: "H87", nombre: "Pieza" },
+  { code: "XBX", nombre: "Caja" },
+  { code: "XPK", nombre: "Paquete" },
+  { code: "XBG", nombre: "Bolsa" },
+  { code: "XSA", nombre: "Saco / Costal" },
+  { code: "DPC", nombre: "Docena" },
+  { code: "MTR", nombre: "Metro" },
+  { code: "E48", nombre: "Unidad de servicio" },
+];
+
+type SatOpcion = { clave_sat: string; descripcion: string };
 type PresRow = { nombre: string; factor: string };
 
 type FormState = {
@@ -44,7 +67,7 @@ function emptyForm(): FormState {
     clave_sat: "01010101",
     unidad_sat: "KGM",
     unidad_base: "KILO",
-    presentaciones: [{ nombre: "KILO", factor: "1" }],
+    presentaciones: [],   // adicionales a la base (la base es 1:1 implícita)
     activo: true,
     perecedero: false,
     requiere_lote: false,
@@ -52,10 +75,16 @@ function emptyForm(): FormState {
 }
 
 function toForm(p: Producto): FormState {
-  const rows = Object.entries(p.presentaciones ?? {}).map(([nombre, factor]) => ({
-    nombre,
-    factor: String(factor),
-  }));
+  const base = p.unidad_base ?? "KILO";
+  // Presentaciones adicionales (excluye la base). Soporta forma simple (número)
+  // y rica ({factor, sat, estimado}).
+  const rows: PresRow[] = Object.entries(p.presentaciones ?? {})
+    .filter(([nombre]) => nombre !== base)
+    .map(([nombre, factor]) => {
+      const f = factor as unknown;
+      const num = typeof f === "object" && f !== null ? (f as { factor?: number }).factor ?? 1 : (f as number);
+      return { nombre, factor: String(num) };
+    });
   return {
     sku: p.sku,
     nombre: p.nombre,
@@ -63,8 +92,8 @@ function toForm(p: Producto): FormState {
     categoria_id: p.categoria_id ?? "",
     clave_sat: p.clave_sat,
     unidad_sat: p.unidad_sat,
-    unidad_base: p.unidad_base ?? "KILO",
-    presentaciones: rows.length ? rows : [{ nombre: p.unidad_base ?? "KILO", factor: "1" }],
+    unidad_base: base,
+    presentaciones: rows,
     activo: p.activo,
     perecedero: p.perecedero,
     requiere_lote: p.requiere_lote,
@@ -116,6 +145,7 @@ export default function ProductosPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [toDelete, setToDelete] = useState<Producto | null>(null);
   const [suggesting, setSuggesting] = useState(false);
+  const [satOpciones, setSatOpciones] = useState<SatOpcion[]>([]);
 
   async function suggestSat() {
     if (!form) return;
@@ -126,16 +156,19 @@ export default function ProductosPage() {
     setSuggesting(true);
     try {
       const s = await apiFetch<{
-        clave_sat: string;
+        opciones: SatOpcion[];
         unidad_sat: string;
-        descripcion_clave: string;
+        descripcion_unidad: string;
         confianza: string;
       }>("/api/v1/sat/sugerir", {
         method: "POST",
         body: JSON.stringify({ nombre: form.nombre, descripcion: form.descripcion || null }),
       });
-      setForm((f) => (f ? { ...f, clave_sat: s.clave_sat, unidad_sat: s.unidad_sat } : f));
-      toast.success(`SAT sugerido (${s.confianza}): ${s.descripcion_clave}`);
+      setSatOpciones(s.opciones);
+      setForm((f) =>
+        f ? { ...f, clave_sat: s.opciones[0]?.clave_sat ?? f.clave_sat, unidad_sat: s.unidad_sat || f.unidad_sat } : f
+      );
+      toast.success(`Sugerencias SAT (confianza ${s.confianza}) — elige la clave`);
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo sugerir");
     } finally {
@@ -145,17 +178,19 @@ export default function ProductosPage() {
 
   function openCreate() {
     setEditingId(null);
+    setSatOpciones([]);
     setForm(emptyForm());
   }
   function openEdit(p: Producto) {
     setEditingId(p.id);
+    setSatOpciones([]);
     setForm(toForm(p));
   }
 
   async function save() {
     if (!form) return;
-    if (!form.sku.trim() || !form.nombre.trim()) {
-      toast.error("SKU y nombre son obligatorios");
+    if (!form.nombre.trim()) {
+      toast.error("El nombre es obligatorio");
       return;
     }
     const unidadBase = form.unidad_base.trim() || "KILO";
@@ -172,7 +207,7 @@ export default function ProductosPage() {
       presentaciones[nombre] = factor;
     }
     const payload = {
-      sku: form.sku.trim(),
+      ...(form.sku.trim() ? { sku: form.sku.trim() } : {}),  // vacío → backend autogenera
       nombre: form.nombre.trim(),
       descripcion: form.descripcion.trim() || null,
       categoria_id: form.categoria_id || null,
@@ -337,109 +372,126 @@ export default function ProductosPage() {
       >
         {form && (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field label="SKU" required>
-              <Input value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })} />
-            </Field>
+            {/* SKU — automático */}
+            <div className="sm:col-span-2">
+              <Field label="SKU" hint={editingId ? undefined : "Se genera automáticamente al guardar"}>
+                <Input value={editingId ? form.sku : ""} placeholder="(automático)" disabled className="max-w-[14rem]" />
+              </Field>
+            </div>
+            {/* nombre + unidad base */}
             <Field label="Nombre" required>
               <Input value={form.nombre} onChange={(e) => setForm({ ...form, nombre: e.target.value })} />
             </Field>
-            <Field label="Categoría">
-              <Select
-                value={form.categoria_id}
-                onChange={(e) => setForm({ ...form, categoria_id: e.target.value })}
-              >
-                <option value="">— Sin categoría —</option>
-                {categorias.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.nombre}
-                  </option>
+            <Field label="Unidad base" hint="Unidad de inventario (todo el stock se guarda aquí)">
+              <Select value={form.unidad_base} onChange={(e) => setForm({ ...form, unidad_base: e.target.value })}>
+                {(UNIDADES_BASE.includes(form.unidad_base) ? UNIDADES_BASE : [form.unidad_base, ...UNIDADES_BASE]).map((u) => (
+                  <option key={u} value={u}>{u}</option>
                 ))}
               </Select>
             </Field>
             <div className="sm:col-span-2">
-              <Button type="button" variant="secondary" onClick={suggestSat} disabled={suggesting}>
-                <Sparkles size={16} /> {suggesting ? "Sugiriendo…" : "Sugerir SAT con IA"}
-              </Button>
+              <Field label="Categoría">
+                <Select value={form.categoria_id} onChange={(e) => setForm({ ...form, categoria_id: e.target.value })}>
+                  <option value="">— Sin categoría —</option>
+                  {categorias.map((c) => (<option key={c.id} value={c.id}>{c.nombre}</option>))}
+                </Select>
+              </Field>
             </div>
-            <Field label="Clave SAT" hint="Clave de producto/servicio SAT">
-              <Input value={form.clave_sat} onChange={(e) => setForm({ ...form, clave_sat: e.target.value })} />
-            </Field>
-            <Field label="Unidad SAT" hint="p.ej. KGM, H87">
-              <Input value={form.unidad_sat} onChange={(e) => setForm({ ...form, unidad_sat: e.target.value })} />
-            </Field>
+
+            {/* Clasificación SAT (CFDI) */}
+            <div className="sm:col-span-2 rounded-lg border border-border bg-surface-2/40 p-3">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-sm font-medium">Clasificación SAT (CFDI)</span>
+                <Button type="button" variant="secondary" onClick={suggestSat} disabled={suggesting}>
+                  <Sparkles size={16} /> {suggesting ? "Sugiriendo…" : "Sugerir con IA"}
+                </Button>
+              </div>
+              {satOpciones.length > 0 && (
+                <div className="mb-3 space-y-1">
+                  <span className="text-xs text-muted">Opciones sugeridas — elige la clave:</span>
+                  {satOpciones.map((o) => (
+                    <button
+                      key={o.clave_sat}
+                      type="button"
+                      onClick={() => setForm({ ...form, clave_sat: o.clave_sat })}
+                      className={`flex w-full items-center gap-2 rounded-md border px-2 py-1.5 text-left text-sm ${
+                        form.clave_sat === o.clave_sat ? "border-accent bg-accent/10" : "border-border hover:bg-surface-2"
+                      }`}
+                    >
+                      <span className="font-mono">{o.clave_sat}</span>
+                      <span className="text-muted">— {o.descripcion}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <Field label="Clave SAT (producto/servicio)">
+                  <Input value={form.clave_sat} onChange={(e) => setForm({ ...form, clave_sat: e.target.value })} />
+                </Field>
+                <Field label="Unidad SAT">
+                  <Select value={form.unidad_sat} onChange={(e) => setForm({ ...form, unidad_sat: e.target.value })}>
+                    {(UNIDADES_SAT.some((u) => u.code === form.unidad_sat)
+                      ? UNIDADES_SAT
+                      : [{ code: form.unidad_sat, nombre: form.unidad_sat }, ...UNIDADES_SAT]
+                    ).map((u) => (
+                      <option key={u.code} value={u.code}>{u.code} — {u.nombre}</option>
+                    ))}
+                  </Select>
+                </Field>
+              </div>
+            </div>
 
             <div className="sm:col-span-2 rounded-lg border border-border bg-surface-2/40 p-3">
-              <Field label="Unidad base" hint="Unidad de inventario — todo el stock se guarda en esta unidad (p.ej. KILO, PIEZA)">
-                <Input
-                  value={form.unidad_base}
-                  onChange={(e) => setForm({ ...form, unidad_base: e.target.value.toUpperCase() })}
-                  className="max-w-[12rem]"
-                />
-              </Field>
-              <div className="mb-1 mt-3 flex items-center justify-between">
+              <div className="mb-2 flex items-center justify-between">
                 <span className="text-sm font-medium">Presentaciones</span>
                 <span className="text-xs text-muted">Factor = unidades base por presentación</span>
               </div>
+              <div className="mb-2 rounded-md bg-surface-2 px-3 py-2 text-sm">
+                Base: <b>{form.unidad_base}</b> = 1 — la unidad de inventario
+              </div>
               <div className="space-y-2">
-                {form.presentaciones.map((r, i) => {
-                  const isBase =
-                    r.nombre.trim().toUpperCase() === form.unidad_base.trim().toUpperCase();
-                  return (
-                    <div key={i} className="flex items-center gap-2">
-                      <Input
-                        placeholder="Nombre (p.ej. BULTO)"
-                        value={r.nombre}
-                        onChange={(e) => {
-                          const next = [...form.presentaciones];
-                          next[i] = { ...next[i], nombre: e.target.value.toUpperCase() };
-                          setForm({ ...form, presentaciones: next });
-                        }}
-                        className="flex-1"
-                      />
-                      <Input
-                        type="number"
-                        step="0.0001"
-                        min="0"
-                        placeholder="Factor"
-                        value={isBase ? "1" : r.factor}
-                        disabled={isBase}
-                        onChange={(e) => {
-                          const next = [...form.presentaciones];
-                          next[i] = { ...next[i], factor: e.target.value };
-                          setForm({ ...form, presentaciones: next });
-                        }}
-                        className="w-28"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const next = form.presentaciones.filter((_, j) => j !== i);
-                          setForm({
-                            ...form,
-                            presentaciones: next.length
-                              ? next
-                              : [{ nombre: form.unidad_base, factor: "1" }],
-                          });
-                        }}
-                        className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-danger"
-                        aria-label="Quitar presentación"
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-                  );
-                })}
+                {form.presentaciones.map((r, i) => (
+                  <div key={i} className="grid grid-cols-[1fr_6rem_auto] items-center gap-2">
+                    <Input
+                      placeholder="Nombre (p.ej. BULTO, CAJA)"
+                      value={r.nombre}
+                      onChange={(e) => {
+                        const next = [...form.presentaciones];
+                        next[i] = { ...next[i], nombre: e.target.value.toUpperCase() };
+                        setForm({ ...form, presentaciones: next });
+                      }}
+                    />
+                    <Input
+                      type="number"
+                      step="0.0001"
+                      min="0"
+                      placeholder="Factor"
+                      value={r.factor}
+                      onChange={(e) => {
+                        const next = [...form.presentaciones];
+                        next[i] = { ...next[i], factor: e.target.value };
+                        setForm({ ...form, presentaciones: next });
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setForm({ ...form, presentaciones: form.presentaciones.filter((_, j) => j !== i) })}
+                      className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-danger"
+                      aria-label="Quitar presentación"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                ))}
+                {form.presentaciones.length === 0 && (
+                  <p className="text-xs text-muted">Solo la unidad base. Agrega CAJA/BULTO si compras o vendes en esas presentaciones.</p>
+                )}
               </div>
               <Button
                 type="button"
                 variant="secondary"
                 className="mt-2"
-                onClick={() =>
-                  setForm({
-                    ...form,
-                    presentaciones: [...form.presentaciones, { nombre: "", factor: "" }],
-                  })
-                }
+                onClick={() => setForm({ ...form, presentaciones: [...form.presentaciones, { nombre: "", factor: "" }] })}
               >
                 <Plus size={16} /> Agregar presentación
               </Button>

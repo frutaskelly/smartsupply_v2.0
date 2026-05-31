@@ -9,7 +9,8 @@ from .common import ORMModel
 
 
 class CategoriaBase(BaseModel):
-    codigo: str = Field(max_length=10)
+    # `codigo` no se acepta como entrada: se autogenera a partir del nombre en
+    # el router (única fuente de verdad). Sólo aparece en la salida.
     nombre: str = Field(max_length=100)
     descripcion: Optional[str] = None
     color: Optional[str] = Field(default=None, max_length=7)
@@ -22,7 +23,6 @@ class CategoriaCreate(CategoriaBase):
 
 
 class CategoriaUpdate(BaseModel):
-    codigo: Optional[str] = Field(default=None, max_length=10)
     nombre: Optional[str] = Field(default=None, max_length=100)
     descripcion: Optional[str] = None
     color: Optional[str] = Field(default=None, max_length=7)
@@ -33,5 +33,6 @@ class CategoriaUpdate(BaseModel):
 class CategoriaOut(ORMModel, CategoriaBase):
     id: uuid.UUID
     tenant_id: uuid.UUID
+    codigo: str
     created_at: datetime
     updated_at: datetime

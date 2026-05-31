@@ -59,44 +59,46 @@ de hueso (durazno, ciruela); 50380000 Frutas exóticas; 50390000 Bayas (fresa).
 Unidades frecuentes: KGM kilogramo; GRM gramo; LTR litro; H87 pieza; \
 XBX caja; XPK paquete; XBG bolsa; MTR metro; XLT lote.
 
-Llama SIEMPRE a la herramienta `registrar_clave_sat` con tu mejor propuesta.\
+Llama SIEMPRE a la herramienta `registrar_clave_sat`. En `opciones_clave` devuelve \
+de 2 a 4 claves candidatas ORDENADAS de la mejor a la menos probable, cada una \
+con su descripción corta. En `unidad_sat` la unidad más apropiada con su nombre.\
 """
 
 _TOOL = {
     "name": "registrar_clave_sat",
-    "description": "Registra la clave de producto/servicio SAT y la unidad SAT sugeridas.",
+    "description": "Registra opciones de clave de producto/servicio SAT y la unidad SAT sugeridas.",
     "input_schema": {
         "type": "object",
         "properties": {
-            "clave_sat": {
-                "type": "string",
-                "description": "Clave c_ClaveProdServ del SAT, exactamente 8 dígitos.",
+            "opciones_clave": {
+                "type": "array",
+                "description": "De 2 a 4 claves c_ClaveProdServ candidatas, mejor primero.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "clave_sat": {"type": "string", "description": "Clave de 8 dígitos."},
+                        "descripcion": {"type": "string", "description": "Descripción corta en español."},
+                    },
+                    "required": ["clave_sat", "descripcion"],
+                },
+                "minItems": 1,
+                "maxItems": 4,
             },
             "unidad_sat": {
                 "type": "string",
                 "description": "Clave c_ClaveUnidad del SAT (p. ej. KGM, H87, XBX).",
             },
-            "descripcion_clave": {
-                "type": "string",
-                "description": "Descripción corta en español de la clave de producto/servicio.",
-            },
             "descripcion_unidad": {
                 "type": "string",
-                "description": "Descripción corta en español de la unidad de medida.",
+                "description": "Nombre de la unidad (p. ej. Kilogramo, Pieza).",
             },
             "confianza": {
                 "type": "string",
                 "enum": ["alta", "media", "baja"],
-                "description": "Nivel de confianza de la sugerencia.",
+                "description": "Nivel de confianza de la mejor opción.",
             },
         },
-        "required": [
-            "clave_sat",
-            "unidad_sat",
-            "descripcion_clave",
-            "descripcion_unidad",
-            "confianza",
-        ],
+        "required": ["opciones_clave", "unidad_sat", "descripcion_unidad", "confianza"],
     },
 }
 
@@ -139,10 +141,20 @@ def sugerir_sat(nombre: str, descripcion: Optional[str] = None) -> dict:
     for block in resp.content:
         if getattr(block, "type", None) == "tool_use" and block.name == "registrar_clave_sat":
             data = dict(block.input)
-            # Defensive defaults so the response model always validates.
-            data.setdefault("confianza", "media")
-            data.setdefault("descripcion_clave", "")
-            data.setdefault("descripcion_unidad", "")
-            return data
+            opciones = data.get("opciones_clave") or []
+            # Normaliza: lista de {clave_sat, descripcion}; tolera respuestas parciales.
+            norm = [
+                {"clave_sat": str(o.get("clave_sat", "")), "descripcion": str(o.get("descripcion", ""))}
+                for o in opciones
+                if isinstance(o, dict) and o.get("clave_sat")
+            ]
+            if not norm:
+                raise SatAIUnavailable("La IA no devolvió una clave válida")
+            return {
+                "opciones": norm,
+                "unidad_sat": str(data.get("unidad_sat", "")),
+                "descripcion_unidad": str(data.get("descripcion_unidad", "")),
+                "confianza": data.get("confianza", "media"),
+            }
 
     raise SatAIUnavailable("La IA no devolvió una sugerencia válida")

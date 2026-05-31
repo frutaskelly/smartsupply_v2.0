@@ -26,6 +26,10 @@ export type CrudField = {
   placeholder?: string;
   options?: { value: string; label: string }[];
   colSpan?: 1 | 2;
+  /** Campo no editable (se muestra deshabilitado). */
+  readOnly?: boolean;
+  /** Valor derivado de otros campos; se recalcula al cambiar el formulario. */
+  derive?: (form: FormValues) => string;
 };
 
 /** A select whose options come from another list endpoint. */
@@ -117,7 +121,14 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
     setForm(config.toForm(row));
   }
   function setField(name: string, value: string | boolean) {
-    setForm((f) => (f ? { ...f, [name]: value } : f));
+    setForm((f) => {
+      if (!f) return f;
+      const next = { ...f, [name]: value };
+      for (const fld of config.fields) {
+        if (fld.derive) next[fld.name] = fld.derive(next);
+      }
+      return next;
+    });
   }
 
   async function save() {
@@ -279,6 +290,8 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
                         placeholder={f.placeholder}
                         value={String(val ?? "")}
                         onChange={(e) => setField(f.name, e.target.value)}
+                        disabled={f.readOnly}
+                        readOnly={f.readOnly}
                       />
                     )}
                   </Field>
