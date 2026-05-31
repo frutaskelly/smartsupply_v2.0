@@ -164,12 +164,17 @@ def test_admin_full_crud_categoria(client, env, auth_as):
     assert client.get("/api/v1/categorias", headers=h).json()["total"] == 0
 
 
-def test_duplicate_codigo_conflicts(client, env, auth_as):
+def test_categoria_codigo_autogenerado(client, env, auth_as):
+    # El código de categoría se deriva del nombre (sin acentos, 5 chars); un
+    # nombre repetido no choca: se le agrega sufijo único.
     auth_as(env["admin_a"])
     h = _hdr(env["admin_a"])
-    body = {"codigo": "DUP", "nombre": "Uno"}
-    assert client.post("/api/v1/categorias", headers=h, json=body).status_code == 201
-    assert client.post("/api/v1/categorias", headers=h, json=body).status_code == 409
+    r1 = client.post("/api/v1/categorias", headers=h, json={"nombre": "Lácteos"})
+    assert r1.status_code == 201, r1.text
+    assert r1.json()["codigo"] == "LACTE"
+    r2 = client.post("/api/v1/categorias", headers=h, json={"nombre": "Lácteos"})
+    assert r2.status_code == 201
+    assert r2.json()["codigo"] == "LACTE2"
 
 
 def test_producto_with_valid_and_invalid_fk(client, env, auth_as):

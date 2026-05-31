@@ -2,6 +2,7 @@
 
 import { CrudPage, type CrudConfig } from "@/components/crud/CrudPage";
 import { Badge } from "@/components/ui/Badge";
+import { categoriaCodigo } from "@/lib/codigo";
 import type { Categoria } from "@/lib/types";
 
 const config: CrudConfig<Categoria> = {
@@ -17,8 +18,14 @@ const config: CrudConfig<Categoria> = {
     { header: "Estado", cell: (c) => <Badge tone={c.activo ? "success" : "muted"}>{c.activo ? "Activo" : "Inactivo"}</Badge> },
   ],
   fields: [
-    { name: "codigo", label: "Código", required: true },
     { name: "nombre", label: "Nombre", required: true },
+    {
+      name: "codigo",
+      label: "Código",
+      readOnly: true,
+      derive: (v) => categoriaCodigo(String(v.nombre ?? "")),
+      hint: "Se genera automáticamente del nombre",
+    },
     { name: "descripcion", label: "Descripción", type: "textarea", colSpan: 2 },
     { name: "color", label: "Color", placeholder: "#3b82f6" },
     { name: "orden", label: "Orden", type: "number" },
@@ -34,7 +41,7 @@ const config: CrudConfig<Categoria> = {
     activo: c.activo,
   }),
   toPayload: (v) => ({
-    codigo: v.codigo,
+    // `codigo` lo autogenera el backend a partir del nombre; no se envía.
     nombre: v.nombre,
     descripcion: (v.descripcion as string) || null,
     color: (v.color as string) || null,
