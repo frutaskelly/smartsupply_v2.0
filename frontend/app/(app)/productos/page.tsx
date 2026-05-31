@@ -450,17 +450,26 @@ export default function ProductosPage() {
                 Base: <b>{form.unidad_base}</b> = 1 — la unidad de inventario
               </div>
               <div className="space-y-2">
-                {form.presentaciones.map((r, i) => (
+                {form.presentaciones.map((r, i) => {
+                  // Opciones predefinidas, sin repetir la unidad base; conserva el valor
+                  // actual aunque no esté en la lista (datos previos).
+                  const opts = UNIDADES_BASE.filter((u) => u !== form.unidad_base);
+                  const nombreOpts = r.nombre && !opts.includes(r.nombre) ? [r.nombre, ...opts] : opts;
+                  return (
                   <div key={i} className="grid grid-cols-[1fr_6rem_auto] items-center gap-2">
-                    <Input
-                      placeholder="Nombre (p.ej. BULTO, CAJA)"
+                    <Select
                       value={r.nombre}
                       onChange={(e) => {
                         const next = [...form.presentaciones];
-                        next[i] = { ...next[i], nombre: e.target.value.toUpperCase() };
+                        next[i] = { ...next[i], nombre: e.target.value };
                         setForm({ ...form, presentaciones: next });
                       }}
-                    />
+                    >
+                      <option value="">— Presentación —</option>
+                      {nombreOpts.map((u) => (
+                        <option key={u} value={u}>{u}</option>
+                      ))}
+                    </Select>
                     <Input
                       type="number"
                       step="0.0001"
@@ -482,7 +491,8 @@ export default function ProductosPage() {
                       <Trash2 size={16} />
                     </button>
                   </div>
-                ))}
+                  );
+                })}
                 {form.presentaciones.length === 0 && (
                   <p className="text-xs text-muted">Solo la unidad base. Agrega CAJA/BULTO si compras o vendes en esas presentaciones.</p>
                 )}
