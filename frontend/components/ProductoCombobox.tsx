@@ -113,6 +113,7 @@ export function ProductoCombobox({
     <div ref={boxRef} className="relative">
       <input
         className={BASE}
+        aria-label="Buscar producto"
         value={q}
         placeholder={placeholder}
         autoFocus={autoFocus}

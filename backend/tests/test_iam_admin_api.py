@@ -13,7 +13,7 @@ from sqlalchemy import text
 from app.core.auth import Principal, get_principal
 from app.core.db import SessionLocal
 from app.main import app
-from app.models import Membership, Role, RolePermission, Tenant, User
+from app.models import Membership, Role, Tenant, User
 
 _PURGE_ROLE_PERMS = "DELETE FROM role_permissions WHERE role_id IN (SELECT id FROM roles WHERE tenant_id = :tid)"
 _PURGE_ROLES = "DELETE FROM roles WHERE tenant_id = :tid"

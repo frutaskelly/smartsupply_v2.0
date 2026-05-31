@@ -9,7 +9,7 @@ from app.core.auth import Principal, get_principal
 from app.core.db import SessionLocal
 from app.main import app
 from app.models import (
-    Almacen, Cliente, Membership, Producto, ProductoAlias, Role, Serie, Sucursal, Tenant,
+    Almacen, Cliente, Membership, Producto, Role, Serie, Sucursal, Tenant,
 )
 
 _PURGE = (

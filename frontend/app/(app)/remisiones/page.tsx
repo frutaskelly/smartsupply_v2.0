@@ -388,7 +388,7 @@ export default function RemisionesPage() {
                 </div>
                 <div className="col-span-2 flex items-center justify-end gap-1 sm:col-span-1">
                   <span className="text-sm tabular-nums">{fmtMoney(l.importe)}</span>
-                  <button onClick={() => setLineas((ls) => ls.filter((x) => x.key !== l.key))} className="text-muted hover:text-danger"><Trash2 size={15} /></button>
+                  <button aria-label="Quitar línea" onClick={() => setLineas((ls) => ls.filter((x) => x.key !== l.key))} className="text-muted hover:text-danger"><Trash2 size={15} /></button>
                 </div>
               </div>
             ))}

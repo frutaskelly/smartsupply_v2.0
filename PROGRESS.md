@@ -1,25 +1,28 @@
 # PROGRESO — feat/remisiones-facturas-ia
 
 Rama: `feat/remisiones-facturas-ia`. Ver [PLAN-remisiones-facturas.md](PLAN-remisiones-facturas.md).
-Backend dev corre contra Supabase cloud (ver memoria backend-db-runtime). Solo sandbox para facturas.
+Backend dev corre contra Supabase cloud. Solo sandbox para facturas. Tests corren contra docker local 5434.
 
-## Estado de migraciones cloud
-- alembic head aplicado: `0024_producto_alias` ✅
+## Migraciones cloud aplicadas: head = `0025_factura_cancelacion`
 
-## Hecho
-- [x] **Series de folios** (cimiento): asignación cliente/sucursal, default, pareja factura+remisión, folio sin guion. (commit 72e7d1d)
-- [x] **Cruce IA — backend**: tabla `producto_alias` + pg_trgm (mig 0024), `services/producto_match.py` (exacto→alias→difuso RapidFuzz→IA Claude), endpoints `POST /productos/match` y `POST /productos/alias`. Verificado live.
+## Hecho ✅
+- [x] Series de folios (cimiento) — commit 72e7d1d
+- [x] Cruce IA backend — producto_alias + match (exacto/alias/difuso/IA) — 77d2374
+- [x] Remisiones frontend — alta+líneas+cruce+cotización+pegar Excel+confirmar/cancelar — 6fb5464
+- [x] Facturas backend sandbox — Facturama + cfdi builder + timbrar/cancelar/pdf/xml — (commit facturas backend)
+- [x] Facturas frontend — generar desde remisiones, timbrar, pdf/xml, cancelar
+- [x] Tests QA remisiones/facturas/cruce + fixes. **Timbrado sandbox verificado E2E (UUID real).**
+- [x] Bug crítico arreglado: resolución de serie había borrado carga de productos/esquemas en facturas.
 
-## En curso / pendiente
-- [ ] Remisiones — frontend completo (lista, alta/edición con line entry + buscador + serie preview, confirmar/cancelar, imprimible)
-- [ ] Pegar como Excel (grid) + combobox de búsqueda (componentes compartidos)
-- [ ] Facturas — backend sandbox: portar `facturama.py` + `cfdi_builder.py` de v1, endpoints timbrar/cancelar/pdf/xml (creds sandbox de v1)
-- [ ] Facturas — frontend (lista, generar desde remisiones, timbrar sandbox, ver XML/PDF, cancelar)
-- [ ] Tests QA remisiones + facturas
-- [ ] QA intenso plataforma + QA-REPORT.md + limpieza segura
-- [ ] lint/tsc/build + PR
+## Suite: 131 passed, 1 skipped (contra 5434).
 
-## Notas / deudas
-- `rapidfuzz` faltaba en el venv local (estaba en requirements); instalado. CI ok.
-- RBAC: `/productos/match` y `/alias` gated con `menu:productos`. Revisar que roles de remisión/factura tengan ese permiso (o aflojar). Anotado para QA.
-- Archivos ajenos en working tree de otra sesión (compras/sistema-diseno/DataTable): NO incluir en mis commits.
+## En curso
+- [ ] **Fase 6 — QA intenso plataforma**: dead code, tablas/columnas sin uso, RLS/RBAC, frontend build → QA-REPORT.md + limpieza segura
+- [ ] lint/tsc/build + push rama + PR
+
+## Notas / config / deudas
+- `.env` (no commiteado) ahora tiene FACTURAMA_USER/PASSWORD (de v1) + FACTURAMA_EXPEDITION_PLACE=78390 (CP del perfil sandbox).
+- **Para timbrar con NUESTRA serie en sandbox**: registrar las series (A, R, …) en el Perfil Fiscal de la cuenta Facturama sandbox (config de cuenta). El pipeline ya quedó probado: timbró un CFDI real sin serie (público general / global).
+- `rapidfuzz` faltaba en venv local (estaba en requirements); instalado.
+- RBAC: `/productos/match` y `/alias` gated con `menu:productos`. Verificar que roles de remisión/factura lo tengan.
+- Archivos ajenos de otra sesión (compras/sistema-diseno/DataTable): fuera de mis commits.

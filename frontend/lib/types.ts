@@ -285,21 +285,6 @@ export type Candidato = {
 };
 export type MatchResult = { texto: string; candidatos: Candidato[] };
 
-export type Movimiento = {
-  id: string;
-  tenant_id: string;
-  tipo: string;
-  fecha: string;
-  lote_id: string;
-  cantidad: string;
-  costo_unitario?: string | null;
-  ref_tipo?: string | null;
-  ref_id?: string | null;
-  motivo?: string | null;
-  notas?: string | null;
-  created_by?: string | null;
-  created_at: string;
-};
 
 export type Proveedor = {
   id: string;
