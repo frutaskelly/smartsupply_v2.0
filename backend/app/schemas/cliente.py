@@ -31,6 +31,9 @@ class ClienteBase(BaseModel):
     descuento_default: Decimal = Field(default=Decimal("0"), ge=0, le=100)
     config_addenda: dict = Field(default_factory=dict)
     custom_fields: dict = Field(default_factory=dict)
+    # series de folios predeterminadas del cliente (la sucursal gana sobre esto)
+    serie_factura_id: Optional[uuid.UUID] = None
+    serie_remision_id: Optional[uuid.UUID] = None
 
 
 class ClienteCreate(ClienteBase):
@@ -55,6 +58,8 @@ class ClienteUpdate(BaseModel):
     descuento_default: Optional[Decimal] = Field(default=None, ge=0, le=100)
     config_addenda: Optional[dict] = None
     custom_fields: Optional[dict] = None
+    serie_factura_id: Optional[uuid.UUID] = None
+    serie_remision_id: Optional[uuid.UUID] = None
 
 
 class ClienteOut(ORMModel, ClienteBase):

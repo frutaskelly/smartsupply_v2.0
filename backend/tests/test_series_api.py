@@ -81,7 +81,7 @@ def test_serie_crud_y_guard(client, env, auth_as):
         "codigo": "A", "tipo": "FISCAL", "tipo_documento": "FACTURA", "nombre": "Facturas"})
     assert r.status_code == 201, r.text
     sid = r.json()["id"]
-    assert any(s["codigo"] == "A" for s in client.get("/api/v1/series", headers=h).json())
+    assert any(s["codigo"] == "A" for s in client.get("/api/v1/series", headers=h).json()["items"])
     # duplicado (codigo+tipo_doc) → 409
     assert client.post("/api/v1/series", headers=h, json={
         "codigo": "A", "tipo": "FISCAL", "tipo_documento": "FACTURA"}).status_code == 409

@@ -39,6 +39,8 @@ class RemisionCreate(BaseModel):
     almacen_id: Optional[uuid.UUID] = None
     sucursal_id: Optional[uuid.UUID] = None
     lista_precios_id: Optional[uuid.UUID] = None
+    # Override manual de serie; si es None se resuelve por sucursal/cliente/default.
+    serie_id: Optional[uuid.UUID] = None
     fecha_remision: Optional[date] = None
     fecha_entrega: Optional[date] = None
     canal: Canal = "MANUAL"

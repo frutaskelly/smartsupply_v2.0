@@ -205,10 +205,14 @@ def main() -> None:
             lista_id[codigo] = l.id
 
         # series default de folios (A factura, NC nota de crédito, R remisión)
+        # cada una es la única de su tipo → es_default=True (predeterminada del inquilino)
         for codigo, tipo, tipo_doc, nombre in SERIES:
             s = db.query(Serie).filter(Serie.codigo == codigo, Serie.tipo_documento == tipo_doc).one_or_none()
             if s is None:
-                db.add(Serie(tenant_id=tid, codigo=codigo, tipo=tipo, tipo_documento=tipo_doc, nombre=nombre))
+                db.add(Serie(
+                    tenant_id=tid, codigo=codigo, tipo=tipo, tipo_documento=tipo_doc,
+                    nombre=nombre, es_default=True,
+                ))
                 n["serie"] += 1
 
         # productos + inventario + precio público base (lista UNICO)

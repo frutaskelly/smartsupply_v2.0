@@ -11,7 +11,9 @@ from .common import ORMModel
 
 class FacturaDesdeRemisionesIn(BaseModel):
     remision_ids: List[uuid.UUID] = Field(min_length=1)
-    serie: str = Field(default="A", max_length=10)
+    # Override manual de serie al emitir; si es None se resuelve por sucursal/cliente/default.
+    serie_id: Optional[uuid.UUID] = None
+    serie: Optional[str] = Field(default=None, max_length=10)  # back-compat por código
     uso_cfdi: Optional[str] = Field(default=None, max_length=5)
     forma_pago: Optional[str] = Field(default=None, max_length=5)
     metodo_pago: Optional[str] = Field(default=None, max_length=5)

@@ -32,7 +32,7 @@ from ...schemas.common import Page
 from ...schemas.factura import FacturaDesdeRemisionesIn, FacturaDetailOut, FacturaOut
 from ...services.fiscal import calcular_linea, totales
 from ...services.inventario import presentacion_sat
-from ...services.series import siguiente_folio
+from ...services.series import consumir_folio, resolver_serie, siguiente_folio
 from ._helpers import get_or_404, paginate
 
 router = APIRouter(prefix="/facturas", tags=["facturas"])
@@ -105,13 +105,26 @@ def factura_desde_remisiones(
     cliente = get_or_404(db, Cliente, clientes.pop())
     tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
 
-    prod_ids = {ln.producto_id for r in rems for ln in r.lineas}
-    productos = {p.id: p for p in db.query(Producto).filter(Producto.id.in_(prod_ids)).all()}
-    esq_ids = {p.esquema_impuesto_id for p in productos.values() if p.esquema_impuesto_id}
-    esquemas = {e.id: e for e in db.query(EsquemaImpuesto).filter(EsquemaImpuesto.id.in_(esq_ids)).all()}
+    # Serie: override manual → sucursal (si todas las remisiones comparten una) →
+    # cliente → default del inquilino. Folio del contador atómico de la serie.
+    sucursales = {r.sucursal_id for r in rems if r.sucursal_id}
+    sucursal_id = sucursales.pop() if len(sucursales) == 1 else None
+    serie_obj = resolver_serie(
+        db, ctx.tenant_id, "FACTURA",
+        serie_id=payload.serie_id, sucursal_id=sucursal_id, cliente_id=cliente.id,
+    )
+    if serie_obj is not None:
+        folio = consumir_folio(db, serie_obj.id)
+        serie_codigo = serie_obj.codigo
+        if folio is None:                       # carrera/desactivada: cae a back-compat
+            serie_codigo = payload.serie or serie_obj.codigo
+            folio = _next_folio(db, ctx.tenant_id, serie_codigo)
+    else:
+        serie_codigo = payload.serie or "A"
+        folio = _next_folio(db, ctx.tenant_id, serie_codigo)
 
     factura = Factura(
-        tenant_id=ctx.tenant_id, serie=payload.serie, folio=_next_folio(db, ctx.tenant_id, payload.serie),
+        tenant_id=ctx.tenant_id, serie=serie_codigo, folio=folio,
         cliente_id=cliente.id,
         uso_cfdi=payload.uso_cfdi or cliente.uso_cfdi_default or "G03",
         forma_pago=payload.forma_pago or cliente.forma_pago_default or "99",

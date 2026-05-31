@@ -100,6 +100,28 @@ export type Sucursal = {
   contacto?: string | null;
   telefono?: string | null;
   activo: boolean;
+  serie_factura_id?: string | null;
+  serie_remision_id?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TipoSerie = "FISCAL" | "NO_FISCAL";
+export type TipoDocSerie = "FACTURA" | "NOTA_CREDITO" | "REMISION" | "PAGO";
+
+export type Serie = {
+  id: string;
+  tenant_id: string;
+  codigo: string;
+  tipo: TipoSerie;
+  tipo_documento: TipoDocSerie;
+  nombre?: string | null;
+  folio_actual: number;
+  activa: boolean;
+  es_default: boolean;
+  vigencia_desde?: string | null;
+  vigencia_hasta?: string | null;
+  notas?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -146,6 +168,8 @@ export type Cliente = {
   dias_credito: number;
   descuento_default: string;
   config_addenda: Record<string, unknown>;
+  serie_factura_id?: string | null;
+  serie_remision_id?: string | null;
   saldo_actual: string;
   ventas_ytd: string;
   ultima_venta_at?: string | null;

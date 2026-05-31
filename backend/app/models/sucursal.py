@@ -36,6 +36,10 @@ class Sucursal(Base, TimestampMixin, SoftDeleteMixin):
     telefono = Column(String(20))
     activo = Column(Boolean, nullable=False, server_default="true")
 
+    # ── series de folios de la sucursal (ganan sobre las del cliente) ──
+    serie_factura_id = Column(UUID(as_uuid=True), ForeignKey("series.id", ondelete="SET NULL"), nullable=True)
+    serie_remision_id = Column(UUID(as_uuid=True), ForeignKey("series.id", ondelete="SET NULL"), nullable=True)
+
     lista_precios = relationship("ListaPrecios")
 
 

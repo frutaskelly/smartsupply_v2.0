@@ -3,6 +3,7 @@ import {
   Building2,
   FileText,
   FolderTree,
+  Hash,
   LayoutDashboard,
   Package,
   Palette,
@@ -53,6 +54,7 @@ export const NAV: NavSection[] = [
   {
     section: "Ajustes",
     items: [
+      { label: "Series y folios", href: "/ajustes/series", perm: "menu:series", icon: Hash },
       { label: "Usuarios", href: "/ajustes/usuarios", perm: "menu:ajustes.usuarios", icon: UserCog },
       { label: "Roles", href: "/ajustes/roles", perm: "menu:ajustes.roles", icon: Shield },
       { label: "Sistema de diseño", href: "/ajustes/sistema-diseno", perm: "menu:configuraciones", icon: Palette },
