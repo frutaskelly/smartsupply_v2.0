@@ -191,6 +191,54 @@ export type ExistenciaRow = {
   valor: string;
 };
 
+export type LineaRemision = {
+  id: string;
+  numero_linea: number;
+  producto_id: string;
+  presentacion: string;
+  cantidad_solicitada: string;
+  cantidad_surtida?: string | null;
+  precio_unitario: string;
+  importe: string;
+  lote_id?: string | null;
+  notas?: string | null;
+};
+
+export type Remision = {
+  id: string;
+  tenant_id: string;
+  folio_interno: string;
+  cliente_facturacion_id: string;
+  almacen_id?: string | null;
+  sucursal_id?: string | null;
+  lista_precios_id?: string | null;
+  fecha_remision: string;
+  fecha_entrega?: string | null;
+  estado: "BORRADOR" | "CONFIRMADA" | "CANCELADA";
+  canal: string;
+  subtotal: string;
+  descuento: string;
+  iva: string;
+  ieps: string;
+  total: string;
+  notas?: string | null;
+  nota_entrega?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type RemisionDetail = Remision & { lineas: LineaRemision[] };
+
+// Cruce de productos (match)
+export type Candidato = {
+  producto_id: string;
+  sku: string;
+  nombre: string;
+  score: number;
+  origen: "exacto" | "alias" | "difuso" | "ia";
+};
+export type MatchResult = { texto: string; candidatos: Candidato[] };
+
 export type Movimiento = {
   id: string;
   tenant_id: string;
