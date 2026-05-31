@@ -16,9 +16,11 @@ Backend dev corre contra Supabase cloud. Solo sandbox para facturas. Tests corre
 
 ## Suite: 131 passed, 1 skipped (contra 5434).
 
-## En curso
-- [ ] **Fase 6 — QA intenso plataforma**: dead code, tablas/columnas sin uso, RLS/RBAC, frontend build → QA-REPORT.md + limpieza segura
-- [ ] lint/tsc/build + push rama + PR
+## Completado ✅
+- [x] **Fase 6 — QA intenso**: dead code, RLS/RBAC, frontend → QA-REPORT.md + limpieza segura aplicada
+- [x] lint/tsc/build verdes + rama pusheada + **PR #1 abierto**: https://github.com/frutaskelly/smartsupply_v2.0/pull/1
+
+## TODO COMPLETO. Entregado en PR #1 para revisión.
 
 ## Notas / config / deudas
 - `.env` (no commiteado) ahora tiene FACTURAMA_USER/PASSWORD (de v1) + FACTURAMA_EXPEDITION_PLACE=78390 (CP del perfil sandbox).
