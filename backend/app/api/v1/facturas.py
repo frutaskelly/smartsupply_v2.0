@@ -114,6 +114,11 @@ def factura_desde_remisiones(
     cliente = get_or_404(db, Cliente, clientes.pop())
     tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
 
+    prod_ids = {ln.producto_id for r in rems for ln in r.lineas}
+    productos = {p.id: p for p in db.query(Producto).filter(Producto.id.in_(prod_ids)).all()}
+    esq_ids = {p.esquema_impuesto_id for p in productos.values() if p.esquema_impuesto_id}
+    esquemas = {e.id: e for e in db.query(EsquemaImpuesto).filter(EsquemaImpuesto.id.in_(esq_ids)).all()}
+
     # Serie: override manual → sucursal (si todas las remisiones comparten una) →
     # cliente → default del inquilino. Folio del contador atómico de la serie.
     sucursales = {r.sucursal_id for r in rems if r.sucursal_id}
