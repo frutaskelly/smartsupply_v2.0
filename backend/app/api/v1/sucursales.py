@@ -24,6 +24,21 @@ _READ = "menu:clientes"
 _WRITE = "cliente:gestionar"
 
 
+def _generate_codigo(db: Session, tenant_id, cliente_id) -> str:
+    """Código secuencial por cliente: SUC-01, SUC-02, … (único dentro del cliente)."""
+    existing = {
+        c
+        for (c,) in db.query(Sucursal.codigo)
+        .filter(Sucursal.tenant_id == tenant_id, Sucursal.cliente_id == cliente_id)
+        .all()
+        if c
+    }
+    n = len(existing) + 1
+    while f"SUC-{n:02d}" in existing:
+        n += 1
+    return f"SUC-{n:02d}"
+
+
 @router.get("", response_model=Page[SucursalOut])
 def list_sucursales(
     cliente_id: Optional[UUID] = Query(default=None),
@@ -56,7 +71,11 @@ def create_sucursal(
 ):
     ensure_fk(db, Cliente, payload.cliente_id, "cliente_id")
     ensure_fk(db, ListaPrecios, payload.lista_precios_id, "lista_precios_id")
-    obj = Sucursal(**payload.model_dump(), tenant_id=ctx.tenant_id)
+    data = payload.model_dump()
+    # El código se autogenera por cliente si no viene dado.
+    if not data.get("codigo"):
+        data["codigo"] = _generate_codigo(db, ctx.tenant_id, payload.cliente_id)
+    obj = Sucursal(**data, tenant_id=ctx.tenant_id)
     db.add(obj)
     db.flush()
     db.refresh(obj)

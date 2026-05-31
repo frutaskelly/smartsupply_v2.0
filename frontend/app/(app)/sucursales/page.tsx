@@ -40,13 +40,28 @@ export default function SucursalesPage() {
   const listas = listasRes.data?.items ?? [];
   const prodName = useMemo(() => Object.fromEntries(productos.map((p) => [p.id, p.nombre])), [productos]);
   const listaName = useMemo(() => Object.fromEntries(listas.map((l) => [l.id, l.nombre])), [listas]);
+  const prodById = useMemo(() => Object.fromEntries(productos.map((p) => [p.id, p])), [productos]);
+
+  // Presentaciones válidas de un producto (con su default al frente). El precio
+  // se guarda por presentación, así que cotizar con una que no existe (p. ej.
+  // "KILO" en un producto que se vende por "PIEZA") no resuelve precio.
+  function presentacionesDe(productoId: string): string[] {
+    const p = prodById[productoId];
+    if (!p) return [];
+    const keys = Object.keys(p.presentaciones ?? {});
+    const def = p.presentacion_default ?? p.unidad_base;
+    return def && keys.includes(def) ? [def, ...keys.filter((k) => k !== def)] : keys;
+  }
+  function presentacionDefault(productoId: string): string {
+    return presentacionesDe(productoId)[0] ?? "";
+  }
 
   const [clienteId, setClienteId] = useState("");
   const [sucursales, setSucursales] = useState<Sucursal[]>([]);
   const [overrides, setOverrides] = useState<PrecioOverride[]>([]);
   const [scope, setScope] = useState("cliente"); // "cliente" | <sucursalId>
 
-  const [nuevaSuc, setNuevaSuc] = useState({ nombre: "", codigo: "", lista_precios_id: "" });
+  const [nuevaSuc, setNuevaSuc] = useState({ nombre: "", lista_precios_id: "" });
   const [nuevoOvr, setNuevoOvr] = useState({ producto_id: "", presentacion: "KILO", precio_unitario: "" });
 
   const sucName = useMemo(() => Object.fromEntries(sucursales.map((s) => [s.id, s.nombre])), [sucursales]);
@@ -86,11 +101,11 @@ export default function SucursalesPage() {
     try {
       await post("/api/v1/sucursales", {
         cliente_id: clienteId, nombre: nuevaSuc.nombre.trim(),
-        codigo: nuevaSuc.codigo.trim() || null,
+        // El código se autogenera en el backend (SUC-01, SUC-02, …).
         lista_precios_id: nuevaSuc.lista_precios_id || null,
       });
       toast.success("Sucursal creada");
-      setNuevaSuc({ nombre: "", codigo: "", lista_precios_id: "" });
+      setNuevaSuc({ nombre: "", lista_precios_id: "" });
       loadSucursales(clienteId);
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo crear");
@@ -196,18 +211,26 @@ export default function SucursalesPage() {
           <section className="rounded-xl border border-border p-4">
             <h2 className="mb-3 text-sm font-semibold">Sucursales (entrega)</h2>
             {canSuc && (
-              <div className="mb-3 grid grid-cols-2 items-end gap-2 sm:grid-cols-4">
-                <div className="col-span-2"><Field label="Nombre"><Input value={nuevaSuc.nombre} onChange={(e) => setNuevaSuc({ ...nuevaSuc, nombre: e.target.value })} /></Field></div>
-                <Field label="Código"><Input value={nuevaSuc.codigo} onChange={(e) => setNuevaSuc({ ...nuevaSuc, codigo: e.target.value })} /></Field>
-                <Field label="Lista propia">
-                  <div className="flex gap-1">
-                    <Select value={nuevaSuc.lista_precios_id} onChange={(e) => setNuevaSuc({ ...nuevaSuc, lista_precios_id: e.target.value })}>
-                      <option value="">(hereda)</option>
-                      {listas.map((l) => <option key={l.id} value={l.id}>{l.nombre}</option>)}
-                    </Select>
-                    <Button onClick={addSucursal}><Plus size={16} /></Button>
-                  </div>
+              <div className="mb-3 space-y-2">
+                <Field label="Nombre">
+                  <Input
+                    placeholder="Ej. Matriz Centro"
+                    value={nuevaSuc.nombre}
+                    onChange={(e) => setNuevaSuc({ ...nuevaSuc, nombre: e.target.value })}
+                  />
                 </Field>
+                <div className="flex items-end gap-2">
+                  <div className="flex-1">
+                    <Field label="Lista propia">
+                      <Select value={nuevaSuc.lista_precios_id} onChange={(e) => setNuevaSuc({ ...nuevaSuc, lista_precios_id: e.target.value })}>
+                        <option value="">(hereda del cliente)</option>
+                        {listas.map((l) => <option key={l.id} value={l.id}>{l.nombre}</option>)}
+                      </Select>
+                    </Field>
+                  </div>
+                  <Button onClick={addSucursal}><Plus size={16} /> Agregar</Button>
+                </div>
+                <p className="text-xs text-muted">El código se genera automáticamente (SUC-01, SUC-02, …).</p>
               </div>
             )}
             <DataTable columns={sucCols} rows={sucursales} empty="Sin sucursales (las ventas usan el precio del cliente)" />
@@ -225,12 +248,16 @@ export default function SucursalesPage() {
             {canOvr && (
               <div className="mb-3 grid grid-cols-2 items-end gap-2 sm:grid-cols-4">
                 <div className="col-span-2"><Field label="Producto">
-                  <Select value={nuevoOvr.producto_id} onChange={(e) => setNuevoOvr({ ...nuevoOvr, producto_id: e.target.value })}>
+                  <Select value={nuevoOvr.producto_id} onChange={(e) => setNuevoOvr({ ...nuevoOvr, producto_id: e.target.value, presentacion: presentacionDefault(e.target.value) })}>
                     <option value="">— Elige —</option>
                     {productos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
                   </Select>
                 </Field></div>
-                <Field label="Present."><Input value={nuevoOvr.presentacion} onChange={(e) => setNuevoOvr({ ...nuevoOvr, presentacion: e.target.value.toUpperCase() })} /></Field>
+                <Field label="Present.">
+                  <Select value={nuevoOvr.presentacion} onChange={(e) => setNuevoOvr({ ...nuevoOvr, presentacion: e.target.value })} disabled={!nuevoOvr.producto_id}>
+                    {presentacionesDe(nuevoOvr.producto_id).map((pr) => <option key={pr} value={pr}>{pr}</option>)}
+                  </Select>
+                </Field>
                 <Field label="Precio">
                   <div className="flex gap-1">
                     <Input type="number" step="0.0001" value={nuevoOvr.precio_unitario} onChange={(e) => setNuevoOvr({ ...nuevoOvr, precio_unitario: e.target.value })} />
@@ -247,12 +274,16 @@ export default function SucursalesPage() {
             <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold"><Calculator size={15} /> Cotizador (precio resuelto)</h2>
             <div className="grid grid-cols-2 items-end gap-2 sm:grid-cols-5">
               <div className="col-span-2"><Field label="Producto">
-                <Select value={cot.producto_id} onChange={(e) => setCot({ ...cot, producto_id: e.target.value })}>
+                <Select value={cot.producto_id} onChange={(e) => setCot({ ...cot, producto_id: e.target.value, presentacion: presentacionDefault(e.target.value) })}>
                   <option value="">— Elige —</option>
                   {productos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
                 </Select>
               </Field></div>
-              <Field label="Present."><Input value={cot.presentacion} onChange={(e) => setCot({ ...cot, presentacion: e.target.value.toUpperCase() })} /></Field>
+              <Field label="Present.">
+                <Select value={cot.presentacion} onChange={(e) => setCot({ ...cot, presentacion: e.target.value })} disabled={!cot.producto_id}>
+                  {presentacionesDe(cot.producto_id).map((pr) => <option key={pr} value={pr}>{pr}</option>)}
+                </Select>
+              </Field>
               <Field label="Cantidad"><Input type="number" value={cot.cantidad} onChange={(e) => setCot({ ...cot, cantidad: e.target.value })} /></Field>
               <Field label="Sucursal">
                 <div className="flex gap-1">
