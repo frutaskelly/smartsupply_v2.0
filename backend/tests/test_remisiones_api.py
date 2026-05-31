@@ -109,12 +109,12 @@ def test_create_draft_and_folio(client, env, auth_as):
     r = _create_rem(client, h, env, "10", "5")
     assert r.status_code == 201, r.text
     rem = r.json()
-    assert rem["folio_interno"] == "R-1"
+    assert rem["folio_interno"] == "R1"
     assert rem["estado"] == "BORRADOR"
     assert float(rem["subtotal"]) == 50.0
     assert float(rem["total"]) == 50.0
     assert len(rem["lineas"]) == 1 and rem["lineas"][0]["numero_linea"] == 1
-    assert _create_rem(client, h, env, "1", "1").json()["folio_interno"] == "R-2"
+    assert _create_rem(client, h, env, "1", "1").json()["folio_interno"] == "R2"
 
 
 def test_confirm_reserves_then_cancel_releases(client, env, auth_as):
