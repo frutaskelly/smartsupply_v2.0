@@ -11,7 +11,11 @@ from .common import ORMModel
 class AlmacenBase(BaseModel):
     codigo: str = Field(max_length=20)
     nombre: str = Field(max_length=254)
-    direccion: Optional[str] = None
+    calle: Optional[str] = Field(default=None, max_length=254)
+    colonia: Optional[str] = Field(default=None, max_length=120)
+    cp: Optional[str] = Field(default=None, max_length=5)
+    ciudad: Optional[str] = Field(default=None, max_length=120)
+    estado: Optional[str] = Field(default=None, max_length=120)
     es_default: bool = False
 
 
@@ -22,7 +26,11 @@ class AlmacenCreate(AlmacenBase):
 class AlmacenUpdate(BaseModel):
     codigo: Optional[str] = Field(default=None, max_length=20)
     nombre: Optional[str] = Field(default=None, max_length=254)
-    direccion: Optional[str] = None
+    calle: Optional[str] = Field(default=None, max_length=254)
+    colonia: Optional[str] = Field(default=None, max_length=120)
+    cp: Optional[str] = Field(default=None, max_length=5)
+    ciudad: Optional[str] = Field(default=None, max_length=120)
+    estado: Optional[str] = Field(default=None, max_length=120)
     es_default: Optional[bool] = None
 
 

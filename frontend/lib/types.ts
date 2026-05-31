@@ -205,7 +205,11 @@ export type Almacen = {
   tenant_id: string;
   codigo: string;
   nombre: string;
-  direccion?: string | null;
+  calle?: string | null;
+  colonia?: string | null;
+  cp?: string | null;
+  ciudad?: string | null;
+  estado?: string | null;
   es_default: boolean;
   created_at: string;
   updated_at: string;

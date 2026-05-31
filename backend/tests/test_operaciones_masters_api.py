@@ -143,8 +143,12 @@ def test_admin_crud_proveedor(client, env, auth_as):
 
 def test_proveedor_missing_required_is_422(client, env, auth_as):
     auth_as(env["admin_a"])
-    r = client.post("/api/v1/proveedores", headers=_hdr(env["admin_a"]), json={"nombre": "Sin código"})
-    assert r.status_code == 422
+    h = _hdr(env["admin_a"])
+    # Falta el nombre (obligatorio) → 422.
+    assert client.post("/api/v1/proveedores", headers=h, json={"rfc": "XAXX010101000"}).status_code == 422
+    # Con nombre basta: el código se autogenera (PROV-01) → 201.
+    r = client.post("/api/v1/proveedores", headers=h, json={"nombre": "Sin código"})
+    assert r.status_code == 201 and r.json()["codigo"]
 
 
 # ─── almacenes (single-default rule) ──────────────────────────────────────────

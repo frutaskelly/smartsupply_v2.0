@@ -4,7 +4,7 @@ Tenant-scoped. Inventory lots and movements live against an almacén. A tenant
 may flag one `es_default` warehouse (enforced in the router, not the schema).
 Soft-deleted because lots reference it.
 """
-from sqlalchemy import Boolean, Column, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Column, String, UniqueConstraint
 
 from ..core.db import Base
 from .base import SoftDeleteMixin, TimestampMixin, tenant_fk, uuid_pk
@@ -20,5 +20,10 @@ class Almacen(Base, TimestampMixin, SoftDeleteMixin):
     tenant_id = tenant_fk()
     codigo = Column(String(20), nullable=False)
     nombre = Column(String(254), nullable=False)
-    direccion = Column(Text)
+    # ── domicilio estructurado ── (cp = Lugar de Expedición del CFDI)
+    calle = Column(String(254))
+    colonia = Column(String(120))
+    cp = Column(String(5))
+    ciudad = Column(String(120))
+    estado = Column(String(120))
     es_default = Column(Boolean, nullable=False, server_default="false")
