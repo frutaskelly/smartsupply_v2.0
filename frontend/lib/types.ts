@@ -42,8 +42,6 @@ export type Categoria = {
   codigo: string;
   nombre: string;
   descripcion?: string | null;
-  color?: string | null;
-  orden: number;
   activo: boolean;
   created_at: string;
   updated_at: string;
@@ -211,6 +209,37 @@ export type Almacen = {
   es_default: boolean;
   created_at: string;
   updated_at: string;
+};
+
+export type LineaOrdenCompra = {
+  id: string;
+  producto_id: string;
+  cantidad_solicitada: string;
+  cantidad_recibida: string;
+  presentacion?: string | null;
+  precio_unitario: string;
+  importe: string;
+  notas?: string | null;
+};
+
+export type OrdenCompra = {
+  id: string;
+  tenant_id: string;
+  folio?: string | null;
+  proveedor_id: string;
+  almacen_destino_id?: string | null;
+  fecha: string;
+  fecha_entrega_esperada?: string | null;
+  fecha_recibida?: string | null;
+  estado: string;
+  subtotal: string;
+  iva_total: string;
+  total_estimado: string;
+  total_recibido: string;
+  notas?: string | null;
+  created_at: string;
+  updated_at: string;
+  lineas?: LineaOrdenCompra[];
 };
 
 export type Conversion = {
