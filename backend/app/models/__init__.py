@@ -12,6 +12,7 @@ from .orden_compra import LineaOrdenCompra, OrdenCompra
 from .permission import Permission
 from .precio import ListaPrecios, Precio
 from .producto import Producto
+from .producto_alias import ProductoAlias
 from .proveedor import Proveedor
 from .remision import LineaRemision, Remision
 from .role import Role
@@ -31,6 +32,7 @@ __all__ = [
     "CategoriaProducto",
     "EsquemaImpuesto",
     "Producto",
+    "ProductoAlias",
     "ListaPrecios",
     "Precio",
     "Cliente",
