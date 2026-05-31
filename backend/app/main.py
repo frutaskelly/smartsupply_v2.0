@@ -26,6 +26,7 @@ from .api.v1 import (
     remisiones,
     roles,
     sat,
+    series,
     sucursales,
 )
 
@@ -96,3 +97,5 @@ app.include_router(memberships.router, prefix="/api/v1")
 # precios v2 — sucursales + cotización + overrides
 app.include_router(sucursales.router, prefix="/api/v1")
 app.include_router(precios.router, prefix="/api/v1")
+# series de folios
+app.include_router(series.router, prefix="/api/v1")

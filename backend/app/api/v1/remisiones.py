@@ -31,6 +31,7 @@ from ...models import (
     Sucursal,
 )
 from ...services.precios import resolver_precio
+from ...services.series import siguiente_folio
 from ...schemas.common import Page
 from ...schemas.remision import (
     ConfirmarRemisionIn,
@@ -50,13 +51,17 @@ _ZERO = Decimal("0")
 _DUP = "Folio de remisión duplicado"
 
 
-def _next_folio(db: Session) -> str:
-    """Per-tenant R-N folio (app-generated; node-aware-ready). Fiscal series → Phase 6."""
+def _next_folio(db: Session, tenant_id) -> str:
+    """Folio R-N de la serie no fiscal 'R' (contador sin huecos); si no existe la
+    serie, cae a max+1 sobre los folios R- existentes (back-compat)."""
+    folio = siguiente_folio(db, tenant_id, codigo="R", tipo_documento="REMISION")
+    if folio is not None:
+        return f"R-{folio}"
     mx = 0
-    for (folio,) in db.query(Remision.folio_interno).filter(Remision.folio_interno.isnot(None)).all():
-        if folio and folio.startswith("R-"):
+    for (f,) in db.query(Remision.folio_interno).filter(Remision.folio_interno.isnot(None)).all():
+        if f and f.startswith("R-"):
             try:
-                mx = max(mx, int(folio[2:]))
+                mx = max(mx, int(f[2:]))
             except ValueError:
                 pass
     return f"R-{mx + 1}"
@@ -104,7 +109,7 @@ def create_remision(
 
     rem = Remision(
         tenant_id=ctx.tenant_id,
-        folio_interno=_next_folio(db),
+        folio_interno=_next_folio(db, ctx.tenant_id),
         cliente_facturacion_id=payload.cliente_facturacion_id,
         almacen_id=payload.almacen_id,
         sucursal_id=payload.sucursal_id,

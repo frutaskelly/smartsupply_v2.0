@@ -11,7 +11,7 @@ from .common import ORMModel
 
 class FacturaDesdeRemisionesIn(BaseModel):
     remision_ids: List[uuid.UUID] = Field(min_length=1)
-    serie: str = Field(default="F", max_length=10)
+    serie: str = Field(default="A", max_length=10)
     uso_cfdi: Optional[str] = Field(default=None, max_length=5)
     forma_pago: Optional[str] = Field(default=None, max_length=5)
     metodo_pago: Optional[str] = Field(default=None, max_length=5)

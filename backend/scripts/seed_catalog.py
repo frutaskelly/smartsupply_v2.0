@@ -28,6 +28,7 @@ from app.models import (
     LoteInventario,
     Precio,
     Producto,
+    Serie,
     Tenant,
 )
 
@@ -59,6 +60,13 @@ ALMACEN = ("BG-CENTRAL", "Bodega Central")
 # Listas default (nivel de venta). UNICO es la base/pública del resolutor.
 LISTAS = [("UNICO", "Precio único"), ("MENUDEO", "Menudeo"), ("MAYOREO", "Mayoreo")]
 MARKUP_BASE = Decimal("1.30")   # precio público sembrado = costo × 1.30
+
+# Series default de folios: (codigo, tipo, tipo_documento, nombre)
+SERIES = [
+    ("A", "FISCAL", "FACTURA", "Facturas"),
+    ("NC", "FISCAL", "NOTA_CREDITO", "Notas de crédito"),
+    ("R", "NO_FISCAL", "REMISION", "Remisiones"),
+]
 
 
 def P(sku, nombre, fam, esq, base, pres, clave, usat, costo, stock, *,
@@ -156,7 +164,7 @@ def main() -> None:
         tid = tenant.id
     print(f"Sembrando catálogo en tenant '{args.slug}' ({tid})")
 
-    n = {"esq": 0, "cat": 0, "prod": 0, "lote": 0, "lista": 0, "precio": 0}
+    n = {"esq": 0, "cat": 0, "prod": 0, "lote": 0, "lista": 0, "precio": 0, "serie": 0}
     with tenant_session(tid) as db:
         # esquemas
         esq_id, esq_rate = {}, {}
@@ -195,6 +203,13 @@ def main() -> None:
                 l = ListaPrecios(tenant_id=tid, codigo=codigo, nombre=nombre)
                 db.add(l); db.flush(); n["lista"] += 1
             lista_id[codigo] = l.id
+
+        # series default de folios (A factura, NC nota de crédito, R remisión)
+        for codigo, tipo, tipo_doc, nombre in SERIES:
+            s = db.query(Serie).filter(Serie.codigo == codigo, Serie.tipo_documento == tipo_doc).one_or_none()
+            if s is None:
+                db.add(Serie(tenant_id=tid, codigo=codigo, tipo=tipo, tipo_documento=tipo_doc, nombre=nombre))
+                n["serie"] += 1
 
         # productos + inventario + precio público base (lista UNICO)
         for p in PRODUCTOS:
@@ -238,7 +253,7 @@ def main() -> None:
                 ))
                 n["precio"] += 1
 
-    print(f"  esquemas={n['esq']} categorías={n['cat']} listas={n['lista']} "
+    print(f"  esquemas={n['esq']} categorías={n['cat']} listas={n['lista']} series={n['serie']} "
           f"productos={n['prod']} lotes={n['lote']} precios={n['precio']}")
     print("Listo (idempotente — vuelve a correr sin duplicar).")
 

@@ -16,6 +16,7 @@ from .proveedor import Proveedor
 from .remision import LineaRemision, Remision
 from .role import Role
 from .role_permission import RolePermission
+from .serie import Serie
 from .sucursal import PrecioOverride, Sucursal
 from .tenant import Membership, Tenant, User
 
@@ -50,4 +51,6 @@ __all__ = [
     # ── precios v2 ──
     "Sucursal",
     "PrecioOverride",
+    # ── series / folios ──
+    "Serie",
 ]

@@ -32,6 +32,7 @@ from ...schemas.common import Page
 from ...schemas.factura import FacturaDesdeRemisionesIn, FacturaDetailOut, FacturaOut
 from ...services.fiscal import calcular_linea, totales
 from ...services.inventario import presentacion_sat
+from ...services.series import siguiente_folio
 from ._helpers import get_or_404, paginate
 
 router = APIRouter(prefix="/facturas", tags=["facturas"])
@@ -41,11 +42,16 @@ _WRITE = "factura:gestionar"
 ZERO = Decimal("0")
 
 
-def _next_folio(db: Session, serie: str) -> int:
+def _next_folio(db: Session, tenant_id, serie: str) -> int:
+    """Folio de la serie (contador sin huecos); si la serie no existe, cae a
+    max+1 sobre las facturas de esa serie (back-compat)."""
+    folio = siguiente_folio(db, tenant_id, codigo=serie, tipo_documento="FACTURA")
+    if folio is not None:
+        return folio
     mx = 0
-    for (folio,) in db.query(Factura.folio).filter(Factura.serie == serie).all():
-        if folio and folio > mx:
-            mx = folio
+    for (f,) in db.query(Factura.folio).filter(Factura.serie == serie).all():
+        if f and f > mx:
+            mx = f
     return mx + 1
 
 
@@ -105,7 +111,7 @@ def factura_desde_remisiones(
     esquemas = {e.id: e for e in db.query(EsquemaImpuesto).filter(EsquemaImpuesto.id.in_(esq_ids)).all()}
 
     factura = Factura(
-        tenant_id=ctx.tenant_id, serie=payload.serie, folio=_next_folio(db, payload.serie),
+        tenant_id=ctx.tenant_id, serie=payload.serie, folio=_next_folio(db, ctx.tenant_id, payload.serie),
         cliente_id=cliente.id,
         uso_cfdi=payload.uso_cfdi or cliente.uso_cfdi_default or "G03",
         forma_pago=payload.forma_pago or cliente.forma_pago_default or "99",
