@@ -118,8 +118,17 @@ export default function InventarioPage() {
   }
 
   const columns: Column<ExistenciaRow>[] = [
-    { header: "Producto", cell: (r) => <span className="font-medium">{prodName[r.producto_id] ?? r.producto_id}</span> },
-    { header: "Almacén", cell: (r) => almName[r.almacen_id] ?? r.almacen_id },
+    {
+      header: "Producto",
+      cell: (r) => (
+        <span className="font-medium">
+          {r.producto_nombre
+            ? `${r.producto_sku ? `${r.producto_sku} · ` : ""}${r.producto_nombre}`
+            : prodName[r.producto_id] ?? r.producto_id}
+        </span>
+      ),
+    },
+    { header: "Almacén", cell: (r) => r.almacen_nombre ?? almName[r.almacen_id] ?? r.almacen_id },
     { header: "Disponible", cell: (r) => fmtNumber(r.disponible), className: "text-right" },
     { header: "Reservada", cell: (r) => fmtNumber(r.reservada), className: "text-right" },
     { header: "Costo prom.", cell: (r) => fmtMoney(r.costo_promedio), className: "text-right" },

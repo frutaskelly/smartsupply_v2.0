@@ -159,7 +159,10 @@ export type Cliente = {
 
 export type ExistenciaRow = {
   producto_id: string;
+  producto_sku: string | null;
+  producto_nombre: string | null;
   almacen_id: string;
+  almacen_nombre: string | null;
   disponible: string;
   reservada: string;
   costo_promedio: string;

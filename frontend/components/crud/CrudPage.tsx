@@ -19,7 +19,7 @@ export type FormValues = Record<string, string | boolean>;
 export type CrudField = {
   name: string;
   label: string;
-  type?: "text" | "number" | "textarea" | "switch" | "select";
+  type?: "text" | "number" | "decimal" | "textarea" | "switch" | "select";
   required?: boolean;
   hint?: string;
   step?: string;
@@ -284,12 +284,21 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
                         ))}
                       </Select>
                     ) : (
+                      // `decimal` usa un input de texto (no el nativo `number`,
+                      // que muestra el separador decimal según el locale del SO
+                      // y acaba pintando "0,0000"). Aquí siempre se usa punto.
                       <Input
                         type={f.type === "number" ? "number" : "text"}
+                        inputMode={f.type === "decimal" ? "decimal" : undefined}
                         step={f.step}
                         placeholder={f.placeholder}
                         value={String(val ?? "")}
-                        onChange={(e) => setField(f.name, e.target.value)}
+                        onChange={(e) =>
+                          setField(
+                            f.name,
+                            f.type === "decimal" ? e.target.value.replace(",", ".") : e.target.value,
+                          )
+                        }
                         disabled={f.readOnly}
                         readOnly={f.readOnly}
                       />

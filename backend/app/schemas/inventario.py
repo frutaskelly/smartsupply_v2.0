@@ -81,7 +81,10 @@ class LoteOut(ORMModel):
 
 class ExistenciaRow(BaseModel):
     producto_id: uuid.UUID
+    producto_sku: Optional[str] = None
+    producto_nombre: Optional[str] = None
     almacen_id: uuid.UUID
+    almacen_nombre: Optional[str] = None
     disponible: Decimal
     reservada: Decimal
     costo_promedio: Decimal

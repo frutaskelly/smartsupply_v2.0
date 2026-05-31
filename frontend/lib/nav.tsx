@@ -5,6 +5,7 @@ import {
   FolderTree,
   LayoutDashboard,
   Package,
+  Palette,
   Percent,
   Repeat,
   Shield,
@@ -54,6 +55,7 @@ export const NAV: NavSection[] = [
     items: [
       { label: "Usuarios", href: "/ajustes/usuarios", perm: "menu:ajustes.usuarios", icon: UserCog },
       { label: "Roles", href: "/ajustes/roles", perm: "menu:ajustes.roles", icon: Shield },
+      { label: "Sistema de diseño", href: "/ajustes/sistema-diseno", perm: "menu:configuraciones", icon: Palette },
     ],
   },
 ];

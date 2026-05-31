@@ -51,28 +51,44 @@ def existencias(
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
-    query = db.query(
-        LoteInventario.producto_id,
-        LoteInventario.almacen_id,
-        func.coalesce(func.sum(LoteInventario.cantidad_disponible), 0).label("disponible"),
-        func.coalesce(func.sum(LoteInventario.cantidad_reservada), 0).label("reservada"),
-        func.coalesce(func.sum(LoteInventario.cantidad_disponible * LoteInventario.costo_unitario), 0).label("valor"),
+    query = (
+        db.query(
+            LoteInventario.producto_id,
+            Producto.sku.label("producto_sku"),
+            Producto.nombre.label("producto_nombre"),
+            LoteInventario.almacen_id,
+            Almacen.nombre.label("almacen_nombre"),
+            func.coalesce(func.sum(LoteInventario.cantidad_disponible), 0).label("disponible"),
+            func.coalesce(func.sum(LoteInventario.cantidad_reservada), 0).label("reservada"),
+            func.coalesce(func.sum(LoteInventario.cantidad_disponible * LoteInventario.costo_unitario), 0).label("valor"),
+        )
+        .join(Producto, Producto.id == LoteInventario.producto_id)
+        .join(Almacen, Almacen.id == LoteInventario.almacen_id)
     )
     if producto_id is not None:
         query = query.filter(LoteInventario.producto_id == producto_id)
     if almacen_id is not None:
         query = query.filter(LoteInventario.almacen_id == almacen_id)
-    query = query.group_by(LoteInventario.producto_id, LoteInventario.almacen_id)
+    query = query.group_by(
+        LoteInventario.producto_id,
+        Producto.sku,
+        Producto.nombre,
+        LoteInventario.almacen_id,
+        Almacen.nombre,
+    )
 
     out = []
-    for pid, aid, disponible, reservada, valor in query.all():
+    for pid, sku, nombre, aid, alm_nombre, disponible, reservada, valor in query.all():
         disponible = Decimal(disponible)
         valor = Decimal(valor)
         costo = (valor / disponible).quantize(_Q) if disponible > 0 else _ZERO
         out.append(
             ExistenciaRow(
                 producto_id=pid,
+                producto_sku=sku,
+                producto_nombre=nombre,
                 almacen_id=aid,
+                almacen_nombre=alm_nombre,
                 disponible=disponible,
                 reservada=Decimal(reservada),
                 costo_promedio=costo,
