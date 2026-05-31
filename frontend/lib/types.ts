@@ -216,6 +216,7 @@ export type Remision = {
   fecha_entrega?: string | null;
   estado: "BORRADOR" | "CONFIRMADA" | "CANCELADA";
   canal: string;
+  factura_id?: string | null;
   subtotal: string;
   descuento: string;
   iva: string;
@@ -228,6 +229,51 @@ export type Remision = {
 };
 
 export type RemisionDetail = Remision & { lineas: LineaRemision[] };
+
+export type LineaFactura = {
+  numero_linea: number;
+  producto_id: string;
+  clave_prod_serv: string;
+  clave_unidad: string;
+  descripcion: string;
+  cantidad: string;
+  valor_unitario: string;
+  importe: string;
+  descuento: string;
+  objeto_imp: string;
+  iva_tasa: string;
+  iva_importe: string;
+  ieps_importe: string;
+  ret_iva_importe: string;
+  ret_isr_importe: string;
+};
+
+export type Factura = {
+  id: string;
+  tenant_id: string;
+  serie: string;
+  folio: number;
+  cliente_id: string;
+  uso_cfdi: string;
+  forma_pago: string;
+  metodo_pago: string;
+  moneda: string;
+  tipo_comprobante: string;
+  fecha: string;
+  subtotal: string;
+  iva_trasladado: string;
+  total: string;
+  estado: "BORRADOR" | "TIMBRADA" | "CANCELADA";
+  uuid?: string | null;
+  fecha_timbrado?: string | null;
+  fecha_cancelacion?: string | null;
+  motivo_cancelacion?: string | null;
+  notas?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type FacturaDetail = Factura & { lineas: LineaFactura[] };
 
 // Cruce de productos (match)
 export type Candidato = {

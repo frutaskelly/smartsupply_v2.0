@@ -71,6 +71,7 @@ class RemisionOut(ORMModel):
     fecha_entrega: Optional[date] = None
     estado: str
     canal: str
+    factura_id: Optional[uuid.UUID] = None
     subtotal: Decimal
     descuento: Decimal
     iva: Decimal
