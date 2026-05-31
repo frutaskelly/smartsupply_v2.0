@@ -18,8 +18,8 @@ const config: CrudConfig<Proveedor> = {
     { header: "Estado", cell: (p) => <Badge tone={p.activo ? "success" : "muted"}>{p.activo ? "Activo" : "Inactivo"}</Badge> },
   ],
   fields: [
-    { name: "codigo", label: "Código", required: true },
     { name: "nombre", label: "Nombre", required: true },
+    { name: "codigo", label: "Código", readOnly: true, hint: "Se genera automáticamente" },
     { name: "rfc", label: "RFC" },
     { name: "contacto", label: "Contacto" },
     { name: "telefono", label: "Teléfono" },
@@ -51,7 +51,7 @@ const config: CrudConfig<Proveedor> = {
     notas: p.notas ?? "",
   }),
   toPayload: (v) => ({
-    codigo: v.codigo,
+    // `codigo` lo autogenera el backend (PROV-01, …); no se envía.
     nombre: v.nombre,
     rfc: (v.rfc as string) || null,
     contacto: (v.contacto as string) || null,

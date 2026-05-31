@@ -9,7 +9,8 @@ from .common import ORMModel
 
 
 class ProveedorBase(BaseModel):
-    codigo: str = Field(max_length=20)
+    # Se autogenera en el router (PROV-01, …) si no viene dado.
+    codigo: Optional[str] = Field(default=None, max_length=20)
     nombre: str = Field(max_length=254)
     rfc: Optional[str] = Field(default=None, max_length=15)
     contacto: Optional[str] = Field(default=None, max_length=254)

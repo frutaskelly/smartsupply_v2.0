@@ -26,6 +26,19 @@ _WRITE = "proveedor:gestionar"
 _DUP = "Ya existe un proveedor con ese código"
 
 
+def _generate_codigo(db: Session, tenant_id) -> str:
+    """Código secuencial por tenant: PROV-01, PROV-02, … (único)."""
+    existing = {
+        c
+        for (c,) in db.query(Proveedor.codigo).filter(Proveedor.tenant_id == tenant_id).all()
+        if c
+    }
+    n = len(existing) + 1
+    while f"PROV-{n:02d}" in existing:
+        n += 1
+    return f"PROV-{n:02d}"
+
+
 @router.get("", response_model=Page[ProveedorOut])
 def list_proveedores(
     q: Optional[str] = Query(default=None, max_length=254),
@@ -55,7 +68,10 @@ def create_proveedor(
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_WRITE)),
 ):
-    obj = Proveedor(**payload.model_dump(), tenant_id=ctx.tenant_id)
+    data = payload.model_dump()
+    if not data.get("codigo"):
+        data["codigo"] = _generate_codigo(db, ctx.tenant_id)
+    obj = Proveedor(**data, tenant_id=ctx.tenant_id)
     db.add(obj)
     flush_or_conflict(db, detail=_DUP)
     db.refresh(obj)
