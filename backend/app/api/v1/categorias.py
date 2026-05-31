@@ -44,7 +44,7 @@ def list_categorias(
         )
     if activo is not None:
         query = query.filter(CategoriaProducto.activo.is_(activo))
-    query = query.order_by(CategoriaProducto.orden.asc(), CategoriaProducto.codigo.asc())
+    query = query.order_by(CategoriaProducto.nombre.asc())
     return paginate(query, CategoriaOut, limit, offset)
 
 

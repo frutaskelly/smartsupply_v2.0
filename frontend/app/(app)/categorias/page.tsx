@@ -14,7 +14,6 @@ const config: CrudConfig<Categoria> = {
   columns: [
     { header: "Código", cell: (c) => <span className="font-medium">{c.codigo}</span> },
     { header: "Nombre", cell: (c) => c.nombre },
-    { header: "Orden", cell: (c) => String(c.orden), className: "text-right" },
     { header: "Estado", cell: (c) => <Badge tone={c.activo ? "success" : "muted"}>{c.activo ? "Activo" : "Inactivo"}</Badge> },
   ],
   fields: [
@@ -27,25 +26,19 @@ const config: CrudConfig<Categoria> = {
       hint: "Se genera automáticamente del nombre",
     },
     { name: "descripcion", label: "Descripción", type: "textarea", colSpan: 2 },
-    { name: "color", label: "Color", placeholder: "#3b82f6" },
-    { name: "orden", label: "Orden", type: "number" },
     { name: "activo", label: "Activo", type: "switch" },
   ],
-  newValues: () => ({ codigo: "", nombre: "", descripcion: "", color: "", orden: "0", activo: true }),
+  newValues: () => ({ codigo: "", nombre: "", descripcion: "", activo: true }),
   toForm: (c) => ({
     codigo: c.codigo,
     nombre: c.nombre,
     descripcion: c.descripcion ?? "",
-    color: c.color ?? "",
-    orden: String(c.orden),
     activo: c.activo,
   }),
   toPayload: (v) => ({
     // `codigo` lo autogenera el backend a partir del nombre; no se envía.
     nombre: v.nombre,
     descripcion: (v.descripcion as string) || null,
-    color: (v.color as string) || null,
-    orden: Number(v.orden) || 0,
     activo: v.activo,
   }),
   rowLabel: (c) => c.nombre,

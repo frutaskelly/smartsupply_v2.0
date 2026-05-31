@@ -3,7 +3,7 @@
 Tenant-scoped master data. Products point at a category via a real FK
 (`productos.categoria_id`) — v1's implicit `linea`-string join is gone.
 """
-from sqlalchemy import Boolean, Column, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Column, String, Text, UniqueConstraint
 
 from ..core.db import Base
 from .base import SoftDeleteMixin, TimestampMixin, tenant_fk, uuid_pk
@@ -20,6 +20,4 @@ class CategoriaProducto(Base, TimestampMixin, SoftDeleteMixin):
     codigo = Column(String(10), nullable=False, index=True)
     nombre = Column(String(100), nullable=False)
     descripcion = Column(Text)
-    color = Column(String(7))  # hex, e.g. "#FF6B6B"
-    orden = Column(Integer, nullable=False, server_default="0")
     activo = Column(Boolean, nullable=False, server_default="true")
