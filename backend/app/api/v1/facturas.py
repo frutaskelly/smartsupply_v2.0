@@ -15,9 +15,11 @@ from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from ...core.config import settings
 from ...core.rbac import AuthContext, get_tenant_db, require_permission
 from ...models import (
     Cliente,
@@ -29,7 +31,14 @@ from ...models import (
     Tenant,
 )
 from ...schemas.common import Page
-from ...schemas.factura import FacturaDesdeRemisionesIn, FacturaDetailOut, FacturaOut
+from ...schemas.factura import (
+    CancelarFacturaIn,
+    FacturaDesdeRemisionesIn,
+    FacturaDetailOut,
+    FacturaOut,
+)
+from ...services.cfdi import build_payload
+from ...services.facturama import FacturamaClient, FacturamaError
 from ...services.fiscal import calcular_linea, totales
 from ...services.inventario import presentacion_sat
 from ...services.series import consumir_folio, resolver_serie, siguiente_folio
@@ -191,3 +200,114 @@ def factura_desde_remisiones(
     db.flush()
     db.refresh(factura)
     return factura
+
+
+# ─── Timbrado (SOLO SANDBOX) ──────────────────────────────────────────────────
+@router.post("/{factura_id}/timbrar", response_model=FacturaDetailOut)
+def timbrar_factura(
+    factura_id: UUID,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """Timbra la factura contra Facturama **sandbox** (BORRADOR → TIMBRADA)."""
+    factura = get_or_404(db, Factura, factura_id)
+    if factura.estado == "TIMBRADA":
+        raise HTTPException(status_code=409, detail="La factura ya está timbrada")
+    if factura.estado == "CANCELADA":
+        raise HTTPException(status_code=409, detail="La factura está cancelada")
+
+    client = FacturamaClient.from_settings(settings)
+    if not client.configured:
+        raise HTTPException(status_code=503, detail="Facturama (sandbox) no está configurado")
+
+    payload = build_payload(db, factura)
+    try:
+        resp = client.create_cfdi(payload)
+    except FacturamaError as exc:
+        raise HTTPException(status_code=502, detail=f"Timbrado rechazado por el PAC: {exc}")
+
+    uuid_sat = ((resp.get("Complement") or {}).get("TaxStamp") or {}).get("Uuid") or resp.get("Uuid")
+    factura.facturama_id = resp.get("Id")
+    factura.uuid = uuid_sat
+    factura.estado = "TIMBRADA"
+    factura.fecha_timbrado = func.now()
+    try:
+        factura.xml = client.download_xml(factura.facturama_id).decode("utf-8", "ignore")
+    except FacturamaError:
+        pass  # el timbre ya quedó; el XML se puede descargar luego
+    db.flush()
+    db.refresh(factura)
+    return factura
+
+
+@router.post("/{factura_id}/cancelar", response_model=FacturaDetailOut)
+def cancelar_factura(
+    factura_id: UUID,
+    payload: CancelarFacturaIn,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """Cancela el CFDI ante el PAC (sandbox) y libera sus remisiones."""
+    factura = get_or_404(db, Factura, factura_id)
+    if factura.estado != "TIMBRADA":
+        raise HTTPException(status_code=409, detail="Solo se cancela una factura timbrada")
+    if payload.motivo == "01" and payload.uuid_sustitucion is None:
+        raise HTTPException(status_code=422, detail="El motivo 01 requiere uuid_sustitucion")
+
+    client = FacturamaClient.from_settings(settings)
+    if not client.configured:
+        raise HTTPException(status_code=503, detail="Facturama (sandbox) no está configurado")
+    try:
+        client.cancel_cfdi(
+            factura.facturama_id, motive=payload.motivo,
+            uuid_replacement=str(payload.uuid_sustitucion) if payload.uuid_sustitucion else None,
+        )
+    except FacturamaError as exc:
+        raise HTTPException(status_code=502, detail=f"Cancelación rechazada por el PAC: {exc}")
+
+    factura.estado = "CANCELADA"
+    factura.fecha_cancelacion = func.now()
+    factura.motivo_cancelacion = payload.motivo
+    factura.uuid_sustitucion = str(payload.uuid_sustitucion) if payload.uuid_sustitucion else None
+    # liberar remisiones para que puedan re-facturarse
+    for r in db.query(Remision).filter(Remision.factura_id == factura.id).all():
+        r.factura_id = None
+    db.flush()
+    db.refresh(factura)
+    return factura
+
+
+@router.get("/{factura_id}/xml")
+def descargar_xml(
+    factura_id: UUID,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    factura = get_or_404(db, Factura, factura_id)
+    xml = factura.xml
+    if not xml and factura.facturama_id:
+        try:
+            xml = FacturamaClient.from_settings(settings).download_xml(factura.facturama_id).decode("utf-8", "ignore")
+        except FacturamaError:
+            xml = None
+    if not xml:
+        raise HTTPException(status_code=404, detail="La factura no tiene XML (¿no está timbrada?)")
+    return Response(content=xml, media_type="application/xml",
+                    headers={"Content-Disposition": f'attachment; filename="{factura.serie}{factura.folio}.xml"'})
+
+
+@router.get("/{factura_id}/pdf")
+def descargar_pdf(
+    factura_id: UUID,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    factura = get_or_404(db, Factura, factura_id)
+    if not factura.facturama_id:
+        raise HTTPException(status_code=404, detail="La factura no está timbrada")
+    try:
+        pdf = FacturamaClient.from_settings(settings).download_pdf(factura.facturama_id)
+    except FacturamaError as exc:
+        raise HTTPException(status_code=502, detail=f"No se pudo descargar el PDF: {exc}")
+    return Response(content=pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": f'inline; filename="{factura.serie}{factura.folio}.pdf"'})

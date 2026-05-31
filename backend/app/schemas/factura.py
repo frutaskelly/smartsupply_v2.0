@@ -20,6 +20,13 @@ class FacturaDesdeRemisionesIn(BaseModel):
     notas: Optional[str] = None
 
 
+class CancelarFacturaIn(BaseModel):
+    # 01 errores con relación (requiere uuid_sustitucion) | 02 sin relación |
+    # 03 no se llevó a cabo | 04 operación nominativa en factura global
+    motivo: str = Field(default="02", pattern="^0[1-4]$")
+    uuid_sustitucion: Optional[uuid.UUID] = None
+
+
 class LineaFacturaOut(ORMModel):
     numero_linea: int
     producto_id: uuid.UUID
@@ -63,6 +70,8 @@ class FacturaOut(ORMModel):
     estado: str
     uuid: Optional[str] = None
     fecha_timbrado: Optional[datetime] = None
+    fecha_cancelacion: Optional[datetime] = None
+    motivo_cancelacion: Optional[str] = None
     pdf_url: Optional[str] = None
     notas: Optional[str] = None
     created_at: datetime

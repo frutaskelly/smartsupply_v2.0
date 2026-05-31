@@ -41,6 +41,12 @@ class Settings(BaseSettings):
     FACTURAMA_API_KEY: str = ""
     FACTURAMA_USER: str = ""
     FACTURAMA_PASSWORD: str = ""
+    # Emisor opcional: si está vacío, Facturama usa el CSD por defecto de la cuenta
+    # (lo correcto en sandbox, donde el RFC real del tenant no tiene CSD registrado).
+    FACTURAMA_ISSUER_RFC: str = ""
+    FACTURAMA_ISSUER_NAME: str = ""
+    FACTURAMA_ISSUER_REGIMEN: str = ""
+    FACTURAMA_EXPEDITION_PLACE: str = ""
 
     # ─── Cache ────────────────────────────────────────────────────────────────
     REDIS_URL: str = "redis://localhost:6379/0"
