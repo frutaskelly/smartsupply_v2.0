@@ -136,14 +136,13 @@ export default function RemisionesPage() {
       return setStep("sucursal");
     }
     if (target === "almacen") {
-      if (alms.length === 0) { setAlmacenId(""); return resolveFrom("serie", sucs, alms); }
-      if (alms.length === 1) { setAlmacenId(alms[0].id); return resolveFrom("serie", sucs, alms); }
+      if (alms.length === 0) { setAlmacenId(""); return resolveFrom("lineas", sucs, alms); }
+      if (alms.length === 1) { setAlmacenId(alms[0].id); return resolveFrom("lineas", sucs, alms); }
       return setStep("almacen");
     }
-    if (target === "serie") {
-      if (!fecha) setFecha(today());
-      return setStep("serie");
-    }
+    // La serie se resuelve sola (automática o la del cliente) → NO detiene el flujo.
+    // Sigue editable manualmente; el Enter pasa directo a las líneas.
+    if (!fecha) setFecha(today());
     setStep("lineas");
     setLineFocus({ key: lineas[0]?.key, field: "producto" });   // enfoca la primera línea
   }
@@ -417,7 +416,7 @@ export default function RemisionesPage() {
               options={almacenOpts}
               value={almacenId}
               onSelect={setAlmacenId}
-              onAdvance={() => resolveFrom("serie")}
+              onAdvance={() => resolveFrom("lineas")}
               autoOpen={step === "almacen"}
               placeholder="Sin almacén"
               emptyText="Sin almacén"
