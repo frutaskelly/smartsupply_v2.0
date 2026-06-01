@@ -55,6 +55,7 @@ export default function SistemaDisenoPage() {
   const [confirm, setConfirm] = useState(false);
   const [busqueda, setBusqueda] = useState("");
   const [unidadSat, setUnidadSat] = useState<string | null>("KGM");
+  const [sel, setSel] = useState("a");
 
   const cols: Column<Demo>[] = [
     { header: "ID", cell: (r) => r.id, className: "w-1", sortable: true, sortValue: (r) => r.id },
@@ -139,17 +140,24 @@ export default function SistemaDisenoPage() {
           <Field label="Campo de texto" required>
             <Input placeholder="Escribe algo…" />
           </Field>
-          <Field label="Selector" hint="con pista debajo">
-            <Select>
-              <option>Opción A</option>
-              <option>Opción B</option>
+          <Field label="Selector" hint="dropdown con el diseño de la app (no el nativo del SO)">
+            <Select value={sel} onChange={(e) => setSel(e.target.value)}>
+              <option value="a">Opción A</option>
+              <option value="b">Opción B</option>
+              <option value="c">Opción C</option>
+              <option value="d" disabled>Opción D (no disponible)</option>
             </Select>
           </Field>
           <Field label="Número">
             <Input type="number" placeholder="0" />
           </Field>
-          <Field label="Deshabilitado">
+          <Field label="Input deshabilitado">
             <Input value="No editable" disabled readOnly />
+          </Field>
+          <Field label="Selector deshabilitado" hint="tono gris suave indica que no se puede usar">
+            <Select value="a" disabled onChange={() => {}}>
+              <option value="a">No editable</option>
+            </Select>
           </Field>
           <div className="sm:col-span-2">
             <Field label="Área de texto">
