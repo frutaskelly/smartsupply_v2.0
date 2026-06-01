@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Plus, Trash2 } from "lucide-react";
+import { Check, Copy, Eye, Pencil, Plus, Power, Trash2 } from "lucide-react";
 
 import { Alert } from "@/components/ui/Alert";
 import { Badge } from "@/components/ui/Badge";
@@ -13,6 +13,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { Field, Input, Select, Switch, Textarea } from "@/components/ui/Field";
 import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { RowActions } from "@/components/ui/RowActions";
 import { SearchBox, SearchSelect, type SearchOption } from "@/components/ui/SearchBox";
 import { Spinner } from "@/components/ui/Spinner";
 import { Tabs } from "@/components/ui/Tabs";
@@ -64,6 +65,27 @@ export default function SistemaDisenoPage() {
       cell: (r) => <Badge tone={r.estado === "Activo" ? "success" : "muted"}>{r.estado}</Badge>,
       sortable: true,
       sortValue: (r) => r.estado,
+    },
+    {
+      header: "", // columna de acciones: fija al final, fuera del menú de columnas / export
+      className: "w-1",
+      cell: (r) => (
+        <RowActions
+          storageKey="demo-acciones"
+          actions={[
+            { key: "ver", label: "Ver detalle", icon: Eye, onClick: () => toast.info(`Ver: ${r.nombre}`) },
+            { key: "editar", label: "Editar", icon: Pencil, onClick: () => toast.info(`Editar: ${r.nombre}`) },
+            {
+              key: "estado",
+              label: r.estado === "Activo" ? "Desactivar" : "Activar",
+              icon: Power,
+              onClick: () => toast.info(`${r.estado === "Activo" ? "Desactivar" : "Activar"}: ${r.nombre}`),
+            },
+            { key: "duplicar", label: "Duplicar", icon: Copy, onClick: () => toast.info(`Duplicar: ${r.nombre}`) },
+            { key: "eliminar", label: "Eliminar", icon: Trash2, tone: "danger", onClick: () => toast.info(`Eliminar: ${r.nombre}`) },
+          ]}
+        />
+      ),
     },
   ];
 
@@ -239,7 +261,9 @@ export default function SistemaDisenoPage() {
           <b>Buscar</b> filtra en todas las columnas (sin acentos, por palabras). Clic en el encabezado para
           ordenar (asc → desc → sin orden). Botón <b>Columnas</b> para mostrar/ocultar y reordenar arrastrando.
           Arrastra el <b>borde derecho</b> de un encabezado para el ancho. Botón <b>Excel</b> para descargar.
-          Pie de tabla con <b>paginado</b> y selector de <b>filas por página</b>. Todo se recuerda por tabla.
+          Pie de tabla con <b>paginado</b> y selector de <b>filas por página</b>. La última columna son
+          <b> acciones</b> (íconos): hasta 3 visibles y el resto en el menú <b>⋮</b>; entra a “Personalizar
+          acciones” para mover acciones dentro/fuera y reordenarlas. Todo se recuerda por tabla.
         </p>
         <DataTable columns={cols} rows={DEMO_ROWS} empty="Sin datos" searchable searchPlaceholder="Buscar producto…" columnsMenu resizable exportable exportFilename="demo" storageKey="demo-sistema-diseno" paginated defaultPageSize={5} pageSizeOptions={[5, 10, 25, 50]} />
       </Card>
