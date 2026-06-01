@@ -12,6 +12,7 @@ import { DataTable, type Column } from "@/components/ui/DataTable";
 import { Field, Input, Select, Textarea } from "@/components/ui/Field";
 import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { Spinner } from "@/components/ui/Spinner";
 import { useToast } from "@/components/ui/Toast";
 import { ApiError, apiFetch } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
@@ -322,17 +323,59 @@ export default function RemisionesPage() {
   }
 
   // ── acciones de lista ──
-  const [detalle, setDetalle] = useState<RemisionDetail | null>(null);
+  // Detalle por fila: se carga bajo demanda al expandir la fila (slide-down).
+  const [detalles, setDetalles] = useState<Record<string, RemisionDetail>>({});
+  const [detalleLoading, setDetalleLoading] = useState<Set<string>>(new Set());
   const [toConfirm, setToConfirm] = useState<Remision | null>(null);
   const [toCancel, setToCancel] = useState<Remision | null>(null);
 
   async function verDetalle(r: Remision) {
+    if (detalles[r.id] || detalleLoading.has(r.id)) return; // ya cargado / en curso
+    setDetalleLoading((s) => new Set(s).add(r.id));
     try {
       const d = await apiFetch<RemisionDetail>(`/api/v1/remisiones/${r.id}`);
-      setDetalle(d);
+      setDetalles((m) => ({ ...m, [r.id]: d }));
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo cargar");
+    } finally {
+      setDetalleLoading((s) => { const n = new Set(s); n.delete(r.id); return n; });
     }
+  }
+
+  // Contenido del panel que se despliega bajo la fila al hacer clic.
+  function renderDetalle(r: Remision) {
+    const d = detalles[r.id];
+    if (!d) {
+      return <div className="flex justify-center py-6"><Spinner /></div>;
+    }
+    return (
+      <div className="rounded-xl border border-border bg-background p-4">
+        <div className="mb-3 flex flex-wrap gap-4 text-sm">
+          <div><span className="text-muted">Cliente:</span> {cliName[d.cliente_facturacion_id] ?? "—"}</div>
+          <div><span className="text-muted">Fecha:</span> {fmtDate(d.fecha_remision)}</div>
+          <div><span className="text-muted">Estado:</span> <Badge tone={ESTADO_TONE[d.estado] ?? "muted"}>{d.estado}</Badge></div>
+        </div>
+        <table className="w-full text-sm">
+          <thead><tr className="border-b border-border text-left text-xs text-muted">
+            <th className="py-1">Producto</th><th>Pres.</th><th className="text-right">Cant.</th><th className="text-right">Precio</th><th className="text-right">Importe</th>
+          </tr></thead>
+          <tbody>
+            {d.lineas.map((l) => (
+              <tr key={l.id} className="border-b border-border/50">
+                <td className="py-1">{prodById[l.producto_id]?.nombre ?? l.producto_id}</td>
+                <td>{l.presentacion}</td>
+                <td className="text-right tabular-nums">{fmtNumber(l.cantidad_solicitada)}</td>
+                <td className="text-right tabular-nums">{fmtMoney(l.precio_unitario)}</td>
+                <td className="text-right tabular-nums">{fmtMoney(l.importe)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="mt-3 flex justify-end gap-4 text-sm">
+          <span className="text-muted">Total</span><span className="font-semibold tabular-nums">{fmtMoney(d.total)}</span>
+        </div>
+      </div>
+    );
   }
   async function confirmar() {
     if (!toConfirm) return;
@@ -366,12 +409,11 @@ export default function RemisionesPage() {
       className: "text-right w-1",
       cell: (r) => (
         <div className="flex justify-end gap-1">
-          <button onClick={() => verDetalle(r)} className="rounded-md px-2 py-1 text-xs text-muted hover:bg-surface-2 hover:text-foreground">Ver</button>
           {canWrite && r.estado === "BORRADOR" && (
-            <button onClick={() => setToConfirm(r)} className="rounded-md px-2 py-1 text-xs text-success hover:bg-surface-2">Confirmar</button>
+            <button onClick={(e) => { e.stopPropagation(); setToConfirm(r); }} className="rounded-md px-2 py-1 text-xs text-success hover:bg-surface-2">Confirmar</button>
           )}
           {canWrite && r.estado !== "CANCELADA" && (
-            <button onClick={() => setToCancel(r)} className="rounded-md px-2 py-1 text-xs text-danger hover:bg-surface-2">Cancelar</button>
+            <button onClick={(e) => { e.stopPropagation(); setToCancel(r); }} className="rounded-md px-2 py-1 text-xs text-danger hover:bg-surface-2">Cancelar</button>
           )}
         </div>
       ),
@@ -543,40 +585,16 @@ export default function RemisionesPage() {
         </Select>
       </div>
 
-      <DataTable columns={columns} rows={rows} loading={loading} error={error} empty="Sin remisiones" />
-
-      {/* detalle */}
-      <Modal open={detalle !== null} onClose={() => setDetalle(null)} title={detalle ? `Remisión ${detalle.folio_interno}` : ""} wide
-        footer={<Button variant="secondary" onClick={() => setDetalle(null)}>Cerrar</Button>}>
-        {detalle && (
-          <div>
-            <div className="mb-3 flex flex-wrap gap-4 text-sm">
-              <div><span className="text-muted">Cliente:</span> {cliName[detalle.cliente_facturacion_id] ?? "—"}</div>
-              <div><span className="text-muted">Fecha:</span> {fmtDate(detalle.fecha_remision)}</div>
-              <div><span className="text-muted">Estado:</span> <Badge tone={ESTADO_TONE[detalle.estado] ?? "muted"}>{detalle.estado}</Badge></div>
-            </div>
-            <table className="w-full text-sm">
-              <thead><tr className="border-b border-border text-left text-xs text-muted">
-                <th className="py-1">Producto</th><th>Pres.</th><th className="text-right">Cant.</th><th className="text-right">Precio</th><th className="text-right">Importe</th>
-              </tr></thead>
-              <tbody>
-                {detalle.lineas.map((l) => (
-                  <tr key={l.id} className="border-b border-border/50">
-                    <td className="py-1">{prodById[l.producto_id]?.nombre ?? l.producto_id}</td>
-                    <td>{l.presentacion}</td>
-                    <td className="text-right tabular-nums">{fmtNumber(l.cantidad_solicitada)}</td>
-                    <td className="text-right tabular-nums">{fmtMoney(l.precio_unitario)}</td>
-                    <td className="text-right tabular-nums">{fmtMoney(l.importe)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <div className="mt-3 flex justify-end gap-4 text-sm">
-              <span className="text-muted">Total</span><span className="font-semibold tabular-nums">{fmtMoney(detalle.total)}</span>
-            </div>
-          </div>
-        )}
-      </Modal>
+      <DataTable
+        columns={columns}
+        rows={rows}
+        loading={loading}
+        error={error}
+        empty="Sin remisiones"
+        rowKey={(r) => r.id}
+        onRowExpand={verDetalle}
+        renderExpanded={renderDetalle}
+      />
 
       <ConfirmDialog open={toConfirm !== null} title="Confirmar remisión"
         message={`¿Confirmar ${toConfirm?.folio_interno}? Se reservará el inventario.`}

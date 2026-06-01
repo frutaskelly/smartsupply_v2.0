@@ -4,6 +4,8 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 
 import { useAuth } from "@/lib/auth";
+import { Button } from "@/components/ui/Button";
+import { Spinner } from "@/components/ui/Spinner";
 import { Sidebar } from "@/components/Sidebar";
 import { Topbar } from "@/components/Topbar";
 
@@ -17,8 +19,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   if (loading) {
     return (
-      <div className="flex h-screen items-center justify-center text-sm text-muted">
-        Cargando…
+      <div className="flex h-screen items-center justify-center">
+        <Spinner />
       </div>
     );
   }
@@ -33,12 +35,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           {accessError ?? "Tu cuenta aún no está provisionada."} Contacta al
           operador de la plataforma.
         </p>
-        <button
-          onClick={signOut}
-          className="mt-2 rounded-lg border border-border px-4 py-2 text-sm hover:bg-surface-2"
-        >
+        <Button variant="secondary" onClick={signOut} className="mt-2">
           Cerrar sesión
-        </button>
+        </Button>
       </div>
     );
   }

@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ArrowDown, ArrowUp, ChevronsUpDown, Columns3, Download, Eye, EyeOff, GripVertical } from "lucide-react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { ArrowDown, ArrowUp, ChevronRight, ChevronsUpDown, Columns3, Download, Eye, EyeOff, GripVertical, MoreVertical } from "lucide-react";
 
+import { Alert } from "./Alert";
 import { EmptyState } from "./EmptyState";
 import { Select } from "./Field";
 import { Spinner } from "./Spinner";
@@ -29,7 +30,24 @@ export type Column<T> = {
 
 type SortState = { id: string; dir: "asc" | "desc" };
 
+/** Acción por fila que se muestra como un ícono en la columna de acciones. */
+export type RowAction<T> = {
+  /** Identidad estable (para recordar orden/visibilidad en el menú ⋮). */
+  id: string;
+  /** Ícono a mostrar. Puede depender de la fila. */
+  icon: ReactNode | ((row: T) => ReactNode);
+  /** Texto del tooltip y nombre en el menú ⋮. */
+  label: string;
+  /** Qué hacer al hacer clic en el ícono. */
+  onClick: (row: T) => void;
+  /** Color del ícono. */
+  tone?: "default" | "danger" | "success";
+  /** Oculta la acción en filas concretas (cuando no aplica a esa fila). */
+  hidden?: (row: T) => boolean;
+};
+
 const MIN_W = 64; // ancho mínimo de columna al redimensionar (px)
+const EXPAND_W = 40; // ancho de la columna del chevron (modo Excel)
 
 function comparable<T>(col: Column<T>, row: T): string | number | null {
   const raw = col.sortValue ? col.sortValue(row) : col.cell(row);
@@ -74,30 +92,27 @@ function norm(s: string): string {
   return s.normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase();
 }
 
-export function DataTable<T>({
-  columns,
-  rows,
-  loading,
-  error,
-  empty,
-  onRowClick,
-  columnsMenu,
-  resizable,
-  exportable,
-  exportFilename = "tabla",
-  storageKey,
-  searchable,
-  searchPlaceholder,
-  paginated,
-  pageSizeOptions = [10, 25, 50, 100],
-  defaultPageSize = 25,
-}: {
+export type DataTableProps<T> = {
   columns: Column<T>[];
   rows: T[];
   loading?: boolean;
   error?: string | null;
   empty?: string;
   onRowClick?: (row: T) => void;
+  /** Si se indica, cada fila es expandible: al hacer clic se despliega un panel
+   *  (slide-down) debajo con este contenido. Sustituye a `onRowClick`. */
+  renderExpanded?: (row: T) => ReactNode;
+  /** Clave estable por fila para recordar cuáles están expandidas (necesaria al
+   *  ordenar/paginar/buscar). Por defecto usa el índice. */
+  rowKey?: (row: T, index: number) => string | number;
+  /** Se llama al expandir una fila (útil para cargar el detalle bajo demanda). */
+  onRowExpand?: (row: T) => void;
+  /** Columna de acciones por fila: una lista de íconos (Ver/Editar/Eliminar…).
+   *  Se renderiza fija al final. */
+  actions?: RowAction<T>[];
+  /** Muestra el menú ⋮ (puntos) en la cabecera de acciones para reordenar y
+   *  mostrar/ocultar los íconos. Se recuerda con `storageKey`. */
+  actionsMenu?: boolean;
   /** Muestra el botón "Columnas" para mostrar/ocultar y reordenar columnas. */
   columnsMenu?: boolean;
   /** Permite cambiar el ancho de las columnas arrastrando el borde derecho. */
@@ -117,7 +132,31 @@ export function DataTable<T>({
   paginated?: boolean;
   pageSizeOptions?: number[];
   defaultPageSize?: number;
-}) {
+};
+
+export function DataTable<T>({
+  columns,
+  rows,
+  loading,
+  error,
+  empty,
+  onRowClick,
+  renderExpanded,
+  rowKey,
+  onRowExpand,
+  actions,
+  actionsMenu,
+  columnsMenu,
+  resizable,
+  exportable,
+  exportFilename = "tabla",
+  storageKey,
+  searchable,
+  searchPlaceholder,
+  paginated,
+  pageSizeOptions = [10, 25, 50, 100],
+  defaultPageSize = 25,
+}: DataTableProps<T>) {
   // ── identidad estable de cada columna ──
   const cols = useMemo(() => {
     const seen = new Map<string, number>();
@@ -133,6 +172,57 @@ export function DataTable<T>({
   }, [columns]);
   const byId = useMemo(() => Object.fromEntries(cols.map((c) => [c.id, c])), [cols]);
   const managedIds = useMemo(() => cols.filter((c) => c.manageable).map((c) => c.id), [cols]);
+
+  // ── filas expandibles (slide-down) ──
+  const expandable = !!renderExpanded;
+  const [expanded, setExpanded] = useState<Set<string | number>>(new Set());
+  function toggleExpand(key: string | number, row: T) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+        onRowExpand?.(row);
+      }
+      return next;
+    });
+  }
+
+  // ── columna de acciones (íconos por fila + menú ⋮ para reordenar/ocultar) ──
+  const hasActions = !!actions && actions.length > 0;
+  const actionById = useMemo(() => Object.fromEntries((actions ?? []).map((a) => [a.id, a])), [actions]);
+  const actionIds = useMemo(() => (actions ?? []).map((a) => a.id), [actions]);
+  const [actionOrder, setActionOrder] = useState<string[]>([]);
+  const [actionHidden, setActionHidden] = useState<string[]>([]);
+  const [actionsMenuOpen, setActionsMenuOpen] = useState(false);
+  const [actionDragId, setActionDragId] = useState<string | null>(null);
+  const actionsMenuRef = useRef<HTMLDivElement>(null);
+  // orden efectivo de los íconos (reconcilia con las acciones actuales)
+  const effectiveActionOrder = useMemo(() => {
+    const fromState = actionOrder.filter((id) => actionIds.includes(id));
+    const missing = actionIds.filter((id) => !fromState.includes(id));
+    return [...fromState, ...missing];
+  }, [actionOrder, actionIds]);
+  const visibleActions = useMemo(
+    () => effectiveActionOrder.filter((id) => !actionHidden.includes(id)).map((id) => actionById[id]).filter(Boolean),
+    [effectiveActionOrder, actionHidden, actionById],
+  );
+  function dropActionOn(targetId: string) {
+    setActionOrder(() => {
+      const base = effectiveActionOrder.slice();
+      if (!actionDragId || actionDragId === targetId) return base;
+      const from = base.indexOf(actionDragId);
+      if (from < 0) return base;
+      base.splice(from, 1);
+      base.splice(base.indexOf(targetId), 0, actionDragId);
+      return base;
+    });
+    setActionDragId(null);
+  }
+  function toggleActionHidden(id: string) {
+    setActionHidden((h) => (h.includes(id) ? h.filter((x) => x !== id) : [...h, id]));
+  }
 
   // ── estado de orden de filas (por id de columna) ──
   const [sort, setSort] = useState<SortState | null>(null);
@@ -159,26 +249,29 @@ export function DataTable<T>({
         if (Array.isArray(p.order)) setOrder(p.order);
         if (Array.isArray(p.hidden)) setHidden(p.hidden);
         if (p.widths && typeof p.widths === "object") setWidths(p.widths);
+        if (Array.isArray(p.actionOrder)) setActionOrder(p.actionOrder);
+        if (Array.isArray(p.actionHidden)) setActionHidden(p.actionHidden);
       }
     } catch { /* ignora storage corrupto */ }
     loadedRef.current = true;
   }, [storageKey]);
   useEffect(() => {
     if (!storageKey || !loadedRef.current) return;
-    try { localStorage.setItem(`dt:${storageKey}`, JSON.stringify({ order, hidden, widths })); } catch { /* noop */ }
-  }, [order, hidden, widths, storageKey]);
+    try { localStorage.setItem(`dt:${storageKey}`, JSON.stringify({ order, hidden, widths, actionOrder, actionHidden })); } catch { /* noop */ }
+  }, [order, hidden, widths, actionOrder, actionHidden, storageKey]);
 
-  // cerrar el menú al hacer clic fuera / Escape
+  // cerrar los menús (columnas / acciones) al hacer clic fuera o con Escape
   useEffect(() => {
-    if (!menuOpen) return;
+    if (!menuOpen && !actionsMenuOpen) return;
     function onDown(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+      if (menuOpen && menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+      if (actionsMenuOpen && actionsMenuRef.current && !actionsMenuRef.current.contains(e.target as Node)) setActionsMenuOpen(false);
     }
-    function onKey(e: KeyboardEvent) { if (e.key === "Escape") setMenuOpen(false); }
+    function onKey(e: KeyboardEvent) { if (e.key === "Escape") { setMenuOpen(false); setActionsMenuOpen(false); } }
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
     return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onKey); };
-  }, [menuOpen]);
+  }, [menuOpen, actionsMenuOpen]);
 
   // orden efectivo de columnas manejables (reconcilia con columnas actuales)
   const effectiveOrder = useMemo(() => {
@@ -274,10 +367,11 @@ export function DataTable<T>({
     e.preventDefault();
     e.stopPropagation();
     const ths = Array.from(theadRef.current?.querySelectorAll("th") ?? []) as HTMLElement[];
+    const lead = expandable ? 1 : 0; // la columna del chevron va primero
     const base: Record<string, number> = { ...widths };
     renderCols.forEach(({ id: cid }, i) => {
       if (base[cid] == null) {
-        base[cid] = Math.round(ths[i]?.getBoundingClientRect().width ?? MIN_W);
+        base[cid] = Math.round(ths[i + lead]?.getBoundingClientRect().width ?? MIN_W);
       }
     });
     const startX = e.clientX;
@@ -309,7 +403,7 @@ export function DataTable<T>({
     downloadCsv(headers, matrix, exportFilename);
   }
 
-  const customized = order.length > 0 || hidden.length > 0 || Object.keys(widths).length > 0;
+  const customized = order.length > 0 || hidden.length > 0 || Object.keys(widths).length > 0 || actionOrder.length > 0 || actionHidden.length > 0;
   const hasToolbar = searchable || columnsMenu || exportable;
 
   const toolbar = hasToolbar ? (
@@ -388,7 +482,7 @@ export function DataTable<T>({
               </div>
               {customized && (
                 <div className="border-t border-border px-2.5 py-1.5">
-                  <button type="button" onClick={() => { setOrder([]); setHidden([]); setWidths({}); }} className="text-xs text-muted hover:text-foreground">
+                  <button type="button" onClick={() => { setOrder([]); setHidden([]); setWidths({}); setActionOrder([]); setActionHidden([]); }} className="text-xs text-muted hover:text-foreground">
                     Restablecer
                   </button>
                 </div>
@@ -402,18 +496,26 @@ export function DataTable<T>({
   ) : null;
 
   const hasWidths = resizable && Object.keys(widths).length > 0;
+  // Total de columnas reales + extras (chevron y acciones), para los colSpan.
+  const totalCols = renderCols.length + (expandable ? 1 : 0) + (hasActions ? 1 : 0);
+  // Ancho de la columna de acciones: depende de cuántos íconos hay visibles
+  // (+ el botón ⋮). Es fija (no se redimensiona).
+  const actionsWidth = (actionsMenu ? 34 : 0) + Math.max(visibleActions.length, 1) * 32 + 16;
   // Ancho total de la tabla en modo Excel = suma de las columnas (las que aún no
-  // tienen ancho explícito cuentan con el mínimo). La tabla se ensancha y el
-  // contenedor hace scroll; agrandar una columna NO comprime a las demás.
+  // tienen ancho explícito cuentan con el mínimo) + las columnas fijas (chevron y
+  // acciones). La tabla se ensancha y el contenedor hace scroll; agrandar una
+  // columna NO comprime a las demás.
   const totalWidth = hasWidths
-    ? renderCols.reduce((sum, { id }) => sum + (widths[id] ?? MIN_W), 0)
+    ? renderCols.reduce((sum, { id }) => sum + (widths[id] ?? MIN_W), 0) +
+      (expandable ? EXPAND_W : 0) +
+      (hasActions ? actionsWidth : 0)
     : undefined;
 
   let body: ReactNode;
   if (loading) {
     body = <div className="flex justify-center py-16"><Spinner /></div>;
   } else if (error) {
-    body = <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</div>;
+    body = <Alert tone="danger">{error}</Alert>;
   } else if (rows.length === 0) {
     body = <EmptyState title={empty ?? "Sin resultados"} />;
   } else {
@@ -428,20 +530,23 @@ export function DataTable<T>({
         >
           {hasWidths && (
             <colgroup>
+              {expandable && <col style={{ width: EXPAND_W }} />}
               {renderCols.map(({ id }) => (
                 <col key={id} style={{ width: widths[id] ?? MIN_W }} />
               ))}
+              {hasActions && <col style={{ width: actionsWidth }} />}
             </colgroup>
           )}
           <thead ref={theadRef} className="bg-surface-2 text-left text-xs uppercase tracking-wide text-muted">
             <tr>
+              {expandable && <th className="w-8 px-2 py-2.5" aria-hidden />}
               {renderCols.map(({ col, id }, ci) => {
                 const active = sort?.id === id;
                 const Icon = active ? (sort!.dir === "asc" ? ArrowUp : ArrowDown) : ChevronsUpDown;
                 // En modo Excel (con anchos) todas las columnas se pueden
                 // redimensionar, incluida la última (la tabla hace scroll). Sin
                 // anchos aún, no tiene sentido en la última (comprimiría).
-                const canResize = resizable && (hasWidths || ci < renderCols.length - 1);
+                const canResize = resizable && (hasWidths || hasActions || ci < renderCols.length - 1);
                 return (
                   <th
                     key={id}
@@ -476,29 +581,130 @@ export function DataTable<T>({
                   </th>
                 );
               })}
+              {hasActions && (
+                <th className="px-2 py-2.5 text-right font-medium">
+                  {actionsMenu ? (
+                    <div className="relative inline-block" ref={actionsMenuRef}>
+                      <button
+                        type="button"
+                        onClick={() => setActionsMenuOpen((o) => !o)}
+                        aria-label="Configurar acciones"
+                        title="Reordenar / mostrar íconos de acciones"
+                        className="rounded-md p-1 text-muted hover:bg-background hover:text-foreground"
+                      >
+                        <MoreVertical size={15} />
+                      </button>
+                      {actionsMenuOpen && (
+                        <div className="absolute right-0 z-30 mt-1 w-60 overflow-hidden rounded-xl border border-border bg-background text-left normal-case shadow-xl">
+                          <div className="border-b border-border px-3 py-2">
+                            <div className="text-xs font-semibold uppercase tracking-wide text-muted">Acciones</div>
+                            <p className="mt-0.5 text-xs text-muted normal-case">Arrastra ⠿ para reordenar. 👁 muestra/oculta el ícono.</p>
+                          </div>
+                          <div className="max-h-72 overflow-auto py-1">
+                            {effectiveActionOrder.map((id) => {
+                              const a = actionById[id];
+                              if (!a) return null;
+                              const isHidden = actionHidden.includes(id);
+                              const previewIcon = typeof a.icon === "function" ? null : a.icon;
+                              return (
+                                <div
+                                  key={id}
+                                  draggable
+                                  onDragStart={() => setActionDragId(id)}
+                                  onDragOver={(e) => e.preventDefault()}
+                                  onDrop={() => dropActionOn(id)}
+                                  onDragEnd={() => setActionDragId(null)}
+                                  className={`flex items-center gap-2 px-2.5 py-1.5 text-sm ${actionDragId === id ? "opacity-40" : ""}`}
+                                >
+                                  <GripVertical size={15} className="shrink-0 cursor-grab text-muted" />
+                                  {previewIcon && <span className="shrink-0 text-muted">{previewIcon}</span>}
+                                  <span className={`flex-1 truncate ${isHidden ? "text-muted line-through" : ""}`}>{a.label}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleActionHidden(id)}
+                                    aria-label={isHidden ? "Mostrar" : "Ocultar"}
+                                    title={isHidden ? "Mostrar" : "Ocultar"}
+                                    className="rounded-md p-1 text-muted hover:bg-surface-2 hover:text-foreground"
+                                  >
+                                    {isHidden ? <EyeOff size={15} /> : <Eye size={15} />}
+                                  </button>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+                </th>
+              )}
             </tr>
           </thead>
           <tbody>
             {filteredRows.length === 0 ? (
               <tr>
-                <td colSpan={renderCols.length} className="px-4 py-8 text-center text-sm text-muted">
+                <td colSpan={totalCols} className="px-4 py-8 text-center text-sm text-muted">
                   Sin coincidencias{search.trim() ? ` para “${search.trim()}”` : ""}
                 </td>
               </tr>
             ) : (
-              pagedRows.map((row, ri) => (
-                <tr
-                  key={ri}
-                  onClick={() => onRowClick?.(row)}
-                  className={`border-t border-border ${onRowClick ? "cursor-pointer hover:bg-surface-2" : ""}`}
-                >
-                  {renderCols.map(({ col, id }) => (
-                    <td key={id} className={`px-4 py-2.5 ${hasWidths ? "truncate" : ""} ${col.className ?? ""}`}>
-                      {col.cell(row)}
-                    </td>
-                  ))}
-                </tr>
-              ))
+              pagedRows.map((row, ri) => {
+                const key = rowKey ? rowKey(row, ri) : ri;
+                const isOpen = expandable && expanded.has(key);
+                const clickable = expandable || !!onRowClick;
+                return (
+                  <Fragment key={key}>
+                    <tr
+                      onClick={() => (expandable ? toggleExpand(key, row) : onRowClick?.(row))}
+                      className={`border-t border-border ${clickable ? "cursor-pointer hover:bg-surface-2" : ""} ${isOpen ? "bg-surface-2" : ""}`}
+                    >
+                      {expandable && (
+                        <td className="px-2 py-2.5 text-muted">
+                          <ChevronRight size={16} className={`transition-transform ${isOpen ? "rotate-90" : ""}`} />
+                        </td>
+                      )}
+                      {renderCols.map(({ col, id }) => (
+                        <td key={id} className={`px-4 py-2.5 ${hasWidths ? "truncate" : ""} ${col.className ?? ""}`}>
+                          {col.cell(row)}
+                        </td>
+                      ))}
+                      {hasActions && (
+                        <td className="px-2 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex justify-end gap-0.5">
+                            {visibleActions.map((a) => {
+                              if (a.hidden?.(row)) return null;
+                              const icon = typeof a.icon === "function" ? a.icon(row) : a.icon;
+                              const toneCls =
+                                a.tone === "danger" ? "text-danger hover:bg-surface-2"
+                                : a.tone === "success" ? "text-success hover:bg-surface-2"
+                                : "text-muted hover:bg-surface-2 hover:text-foreground";
+                              return (
+                                <button
+                                  key={a.id}
+                                  type="button"
+                                  title={a.label}
+                                  aria-label={a.label}
+                                  onClick={(e) => { e.stopPropagation(); a.onClick(row); }}
+                                  className={`rounded-md p-1.5 ${toneCls}`}
+                                >
+                                  {icon}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </td>
+                      )}
+                    </tr>
+                    {isOpen && (
+                      <tr className="border-t border-border bg-surface-2/40">
+                        <td colSpan={totalCols} className="px-4 pb-4">
+                          <ExpandedPanel>{renderExpanded!(row)}</ExpandedPanel>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })
             )}
           </tbody>
         </table>
@@ -558,6 +764,21 @@ export function DataTable<T>({
       {toolbar}
       {body}
       {footer}
+    </div>
+  );
+}
+
+/** Panel de detalle que se despliega (slide-down) al expandir una fila. Anima la
+ *  altura con el truco de `grid-template-rows: 0fr → 1fr` (sin medir alturas). */
+function ExpandedPanel({ children }: { children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setOpen(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
+  return (
+    <div className={`grid transition-[grid-template-rows] duration-200 ease-out ${open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
+      <div className="overflow-hidden">{children}</div>
     </div>
   );
 }

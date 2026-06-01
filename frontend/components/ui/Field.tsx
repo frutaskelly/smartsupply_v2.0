@@ -22,7 +22,7 @@ import type {
 } from "react";
 
 const BASE =
-  "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent disabled:opacity-60";
+  "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent disabled:bg-surface-2 disabled:text-muted disabled:opacity-60";
 
 export function Field({
   label,
@@ -281,6 +281,19 @@ export function Select({
     </div>
   );
 }
+
+export const Checkbox = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(
+  function Checkbox({ className = "", ...rest }, ref) {
+    return (
+      <input
+        ref={ref}
+        type="checkbox"
+        {...rest}
+        className={`h-4 w-4 rounded border-border accent-accent disabled:opacity-60 ${className}`}
+      />
+    );
+  },
+);
 
 export function Switch({
   checked,
