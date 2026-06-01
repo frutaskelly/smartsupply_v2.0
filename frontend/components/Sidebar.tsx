@@ -126,7 +126,7 @@ function NavRow({
           size={15}
           className={
             favorite
-              ? "fill-amber-500 text-amber-500"
+              ? "fill-favorite text-favorite"
               : "text-muted opacity-50 transition group-hover:opacity-100 hover:text-foreground"
           }
         />

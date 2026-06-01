@@ -3,6 +3,9 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 
+import { Alert } from "@/components/ui/Alert";
+import { Button } from "@/components/ui/Button";
+import { Field, Input } from "@/components/ui/Field";
 import { useAuth } from "@/lib/auth";
 import { getSupabase } from "@/lib/supabaseClient";
 
@@ -35,40 +38,30 @@ export default function LoginPage() {
         <p className="mt-1 text-sm text-muted">Inicia sesión para continuar</p>
 
         <form onSubmit={onSubmit} className="mt-6 space-y-4">
-          <div>
-            <label className="block text-sm font-medium" htmlFor="email">Correo</label>
-            <input
-              id="email"
+          <Field label="Correo">
+            <Input
               type="email"
               autoComplete="email"
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent"
             />
-          </div>
-          <div>
-            <label className="block text-sm font-medium" htmlFor="password">Contraseña</label>
-            <input
-              id="password"
+          </Field>
+          <Field label="Contraseña">
+            <Input
               type="password"
               autoComplete="current-password"
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent"
             />
-          </div>
+          </Field>
 
-          {error && <p className="text-sm text-danger">{error}</p>}
+          {error && <Alert tone="danger">{error}</Alert>}
 
-          <button
-            type="submit"
-            disabled={busy}
-            className="w-full rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white transition hover:opacity-90 disabled:opacity-50"
-          >
+          <Button type="submit" disabled={busy} className="w-full">
             {busy ? "Entrando…" : "Entrar"}
-          </button>
+          </Button>
         </form>
       </div>
     </main>

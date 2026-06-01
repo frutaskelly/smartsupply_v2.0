@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { DataTable, type Column } from "@/components/ui/DataTable";
-import { Field, Input } from "@/components/ui/Field";
+import { Checkbox, Field, Input } from "@/components/ui/Field";
 import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Spinner } from "@/components/ui/Spinner";
@@ -357,13 +357,7 @@ function PermCheck({
         disabled ? "opacity-70" : "cursor-pointer hover:bg-surface-2"
       }`}
     >
-      <input
-        type="checkbox"
-        className="h-4 w-4 rounded border-border accent-primary"
-        checked={checked}
-        disabled={disabled}
-        onChange={onChange}
-      />
+      <Checkbox checked={checked} disabled={disabled} onChange={onChange} />
       <span>{label}</span>
     </label>
   );

@@ -6,6 +6,7 @@ import { Trash2, UserCog } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { DataTable, type Column } from "@/components/ui/DataTable";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { Select, Switch } from "@/components/ui/Field";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { useToast } from "@/components/ui/Toast";
@@ -145,10 +146,11 @@ export default function UsuariosPage() {
       />
 
       {members.length === 0 && !membersRes.loading ? (
-        <div className="rounded-xl border border-border p-8 text-center text-sm text-muted">
-          <UserCog className="mx-auto mb-2 text-muted" size={28} />
-          Aún no hay otros usuarios. El alta de nuevos usuarios se realiza durante el aprovisionamiento.
-        </div>
+        <EmptyState
+          icon={<UserCog size={28} />}
+          title="Aún no hay otros usuarios"
+          hint="El alta de nuevos usuarios se realiza durante el aprovisionamiento."
+        />
       ) : (
         <DataTable
           columns={columns}

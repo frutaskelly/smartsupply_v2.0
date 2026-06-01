@@ -5,6 +5,7 @@ import { Building2, Calculator, Plus, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
 import { DataTable, type Column } from "@/components/ui/DataTable";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { Field, Input, Select } from "@/components/ui/Field";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { useToast } from "@/components/ui/Toast";
@@ -207,10 +208,11 @@ export default function SucursalesPage() {
       </div>
 
       {!clienteId ? (
-        <div className="rounded-xl border border-border p-8 text-center text-sm text-muted">
-          <Building2 className="mx-auto mb-2 text-muted" size={28} />
-          Elige un cliente para administrar sus sucursales y precios especiales.
-        </div>
+        <EmptyState
+          icon={<Building2 size={28} />}
+          title="Elige un cliente"
+          hint="Selecciona un cliente para administrar sus sucursales y precios especiales."
+        />
       ) : (
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           {/* Sucursales */}

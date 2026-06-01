@@ -13,6 +13,7 @@
 :root {
   --danger: #d70015;
   --success: #1c8c3c;
+  --favorite: #f59e0b;
 }
 
 @theme inline {
@@ -25,6 +26,7 @@
   --color-accent: var(--accent);
   --color-danger: var(--danger);
   --color-success: var(--success);
+  --color-favorite: var(--favorite);
 }
 
 html,

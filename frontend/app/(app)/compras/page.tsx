@@ -5,6 +5,7 @@ import { Eye, PackageCheck, Plus, ShoppingCart, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { Field, Input, Select, Textarea } from "@/components/ui/Field";
 import { Modal } from "@/components/ui/Modal";
@@ -131,6 +132,7 @@ export default function ComprasPage() {
   // ── detalle / acciones ──
   const [detail, setDetail] = useState<OrdenCompra | null>(null);
   const [busy, setBusy] = useState(false);
+  const [confirmRecibir, setConfirmRecibir] = useState(false);
   async function openDetail(id: string) {
     try {
       setDetail(await apiFetch<OrdenCompra>(`${BASE}/${id}`));
@@ -155,11 +157,11 @@ export default function ComprasPage() {
   }
   async function doRecibir() {
     if (!detail) return;
-    if (!window.confirm("¿Recibir todo lo pendiente y sumarlo a inventario?")) return;
     setBusy(true);
     try {
       await post(`${BASE}/${detail.id}/recibir`, {});
       await refreshDetail(detail.id);
+      setConfirmRecibir(false);
       toast.success("Mercancía recibida y sumada a inventario");
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo recibir");
@@ -303,7 +305,7 @@ export default function ComprasPage() {
                 <Button key={t.to} variant="secondary" disabled={busy} onClick={() => doTransition(t.to)}>{t.label}</Button>
               ))}
               {canWrite && RECEIVABLE.has(detail.estado) && (
-                <Button disabled={busy} onClick={doRecibir}><PackageCheck size={16} /> Recibir todo</Button>
+                <Button disabled={busy} onClick={() => setConfirmRecibir(true)}><PackageCheck size={16} /> Recibir todo</Button>
               )}
             </div>
           </div>
@@ -361,6 +363,17 @@ export default function ComprasPage() {
           </div>
         )}
       </Modal>
+
+      <ConfirmDialog
+        open={confirmRecibir}
+        title="Recibir mercancía"
+        message="¿Recibir todo lo pendiente y sumarlo a inventario? Esta acción actualiza el stock."
+        confirmLabel="Recibir todo"
+        confirmVariant="primary"
+        onConfirm={doRecibir}
+        onClose={() => setConfirmRecibir(false)}
+        loading={busy}
+      />
     </div>
   );
 }
