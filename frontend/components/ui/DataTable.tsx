@@ -240,8 +240,15 @@ export function DataTable<T>({
       return null;
     });
   }
+  // Cuántas columnas manejables quedarían visibles si ocultamos `id`.
+  const visibleManagedCount = managedIds.filter((mid) => !hidden.includes(mid)).length;
   function toggleHidden(id: string) {
-    setHidden((h) => (h.includes(id) ? h.filter((x) => x !== id) : [...h, id]));
+    setHidden((h) => {
+      if (h.includes(id)) return h.filter((x) => x !== id); // mostrar: siempre permitido
+      // Ocultar: estándar de data-grids — nunca dejar la tabla sin columnas.
+      if (visibleManagedCount <= 1) return h;
+      return [...h, id];
+    });
   }
   function dropOn(targetId: string) {
     setOrder(() => {
@@ -256,22 +263,30 @@ export function DataTable<T>({
     setDragId(null);
   }
 
-  // ── redimensionar columnas ──
+  // ── redimensionar columnas (modelo Excel) ──
+  // Al arrastrar el borde de una columna, SOLO cambia esa columna: la tabla
+  // crece/encoge a lo ancho y aparece scroll horizontal. Las demás conservan su
+  // ancho (no se comprimen). Para lograrlo, al iniciar el primer resize se
+  // "congela" el ancho actual de TODAS las columnas; a partir de ahí cada una
+  // tiene un ancho explícito e independiente.
   const theadRef = useRef<HTMLTableSectionElement>(null);
   function startResize(e: React.MouseEvent, id: string) {
     e.preventDefault();
     e.stopPropagation();
-    const th = (e.currentTarget as HTMLElement).closest("th") as HTMLElement | null;
+    const ths = Array.from(theadRef.current?.querySelectorAll("th") ?? []) as HTMLElement[];
+    const base: Record<string, number> = { ...widths };
+    renderCols.forEach(({ id: cid }, i) => {
+      if (base[cid] == null) {
+        base[cid] = Math.round(ths[i]?.getBoundingClientRect().width ?? MIN_W);
+      }
+    });
     const startX = e.clientX;
-    const startW = th?.getBoundingClientRect().width ?? widths[id] ?? MIN_W;
-    // El ancho máximo se acota para no desbordar la tabla: lo que mide la tabla
-    // menos el espacio mínimo que necesitan las demás columnas visibles.
-    const tableW = theadRef.current?.closest("table")?.getBoundingClientRect().width ?? Infinity;
-    const otherCols = Math.max(0, renderCols.length - 1);
-    const maxW = Math.max(MIN_W, tableW - otherCols * MIN_W);
+    const startW = base[id] ?? MIN_W;
+    setWidths(base); // congela el layout actual (todas las columnas con ancho fijo)
 
     function onMove(ev: MouseEvent) {
-      const next = Math.min(maxW, Math.max(MIN_W, startW + (ev.clientX - startX)));
+      // Sin tope superior: igual que Excel, la tabla se ensancha y hace scroll.
+      const next = Math.max(MIN_W, startW + (ev.clientX - startX));
       setWidths((w) => ({ ...w, [id]: Math.round(next) }));
     }
     function onUp() {
@@ -335,13 +350,16 @@ export function DataTable<T>({
             <div className="absolute right-0 z-30 mt-1 w-64 overflow-hidden rounded-xl border border-border bg-background shadow-xl">
               <div className="border-b border-border px-3 py-2">
                 <div className="text-xs font-semibold uppercase tracking-wide text-muted">Columnas</div>
-                <p className="mt-0.5 text-xs text-muted">Arrastra ⠿ para reordenar. Toggle 👁 para mostrar/ocultar.</p>
+                <p className="mt-0.5 text-xs text-muted">Arrastra ⠿ para reordenar. 👁 muestra/oculta (siempre queda al menos una).</p>
               </div>
               <div className="max-h-72 overflow-auto py-1">
                 {effectiveOrder.map((id) => {
                   const entry = byId[id];
                   if (!entry) return null;
                   const isHidden = hidden.includes(id);
+                  // No se puede ocultar la última columna visible (siempre debe
+                  // quedar al menos una).
+                  const lockHide = !isHidden && visibleManagedCount <= 1;
                   return (
                     <div
                       key={id}
@@ -357,8 +375,10 @@ export function DataTable<T>({
                       <button
                         type="button"
                         onClick={() => toggleHidden(id)}
+                        disabled={lockHide}
                         aria-label={isHidden ? "Mostrar" : "Ocultar"}
-                        className="rounded-md p-1 text-muted hover:bg-surface-2 hover:text-foreground"
+                        title={lockHide ? "Debe quedar al menos una columna visible" : isHidden ? "Mostrar" : "Ocultar"}
+                        className="rounded-md p-1 text-muted hover:bg-surface-2 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
                       >
                         {isHidden ? <EyeOff size={15} /> : <Eye size={15} />}
                       </button>
@@ -382,6 +402,12 @@ export function DataTable<T>({
   ) : null;
 
   const hasWidths = resizable && Object.keys(widths).length > 0;
+  // Ancho total de la tabla en modo Excel = suma de las columnas (las que aún no
+  // tienen ancho explícito cuentan con el mínimo). La tabla se ensancha y el
+  // contenedor hace scroll; agrandar una columna NO comprime a las demás.
+  const totalWidth = hasWidths
+    ? renderCols.reduce((sum, { id }) => sum + (widths[id] ?? MIN_W), 0)
+    : undefined;
 
   let body: ReactNode;
   if (loading) {
@@ -393,12 +419,17 @@ export function DataTable<T>({
   } else {
     body = (
       <div className="overflow-x-auto rounded-xl border border-border">
-        {/* table-fixed solo cuando hay anchos definidos, para que se respeten. */}
-        <table className={`w-full text-sm ${hasWidths ? "table-fixed" : ""}`}>
+        {/* Con anchos definidos (modo Excel): table-fixed + ancho explícito = la
+            tabla se ensancha y el contenedor hace scroll, sin comprimir columnas.
+            Sin anchos: w-full normal (la tabla se ajusta al contenedor). */}
+        <table
+          className={`text-sm ${hasWidths ? "table-fixed" : "w-full"}`}
+          style={hasWidths ? { width: totalWidth, minWidth: "100%" } : undefined}
+        >
           {hasWidths && (
             <colgroup>
               {renderCols.map(({ id }) => (
-                <col key={id} style={widths[id] ? { width: widths[id] } : undefined} />
+                <col key={id} style={{ width: widths[id] ?? MIN_W }} />
               ))}
             </colgroup>
           )}
@@ -407,7 +438,10 @@ export function DataTable<T>({
               {renderCols.map(({ col, id }, ci) => {
                 const active = sort?.id === id;
                 const Icon = active ? (sort!.dir === "asc" ? ArrowUp : ArrowDown) : ChevronsUpDown;
-                const canResize = resizable && ci < renderCols.length - 1; // no en la última
+                // En modo Excel (con anchos) todas las columnas se pueden
+                // redimensionar, incluida la última (la tabla hace scroll). Sin
+                // anchos aún, no tiene sentido en la última (comprimiría).
+                const canResize = resizable && (hasWidths || ci < renderCols.length - 1);
                 return (
                   <th
                     key={id}

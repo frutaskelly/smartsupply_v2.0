@@ -55,7 +55,7 @@ export default function SistemaDisenoPage() {
   const [confirm, setConfirm] = useState(false);
   const [busqueda, setBusqueda] = useState("");
   const [unidadSat, setUnidadSat] = useState<string | null>("KGM");
-  const [sel, setSel] = useState("");
+  const [sel, setSel] = useState("a");
 
   const cols: Column<Demo>[] = [
     { header: "ID", cell: (r) => r.id, className: "w-1", sortable: true, sortValue: (r) => r.id },
@@ -136,18 +136,12 @@ export default function SistemaDisenoPage() {
 
       {/* Formulario */}
       <Card title="Formulario" subtitle="Field, Input, Select, Textarea, Switch">
-        <p className="mb-3 text-sm text-muted">
-          Los <b>dropdown</b> usan el diseño de la app (no el nativo del sistema): se abren en un
-          panel blanco con borde, ✓ en la opción activa, navegación por teclado (↑/↓, Enter, Esc) y
-          escribir para buscar. El estado <b>deshabilitado</b> se muestra en gris suave.
-        </p>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="Campo de texto" required>
             <Input placeholder="Escribe algo…" />
           </Field>
-          <Field label="Selector (dropdown de la app)" hint="abre un panel blanco, no el nativo">
+          <Field label="Selector" hint="dropdown con el diseño de la app (no el nativo del SO)">
             <Select value={sel} onChange={(e) => setSel(e.target.value)}>
-              <option value="">Selecciona…</option>
               <option value="a">Opción A</option>
               <option value="b">Opción B</option>
               <option value="c">Opción C</option>
@@ -157,32 +151,22 @@ export default function SistemaDisenoPage() {
           <Field label="Número">
             <Input type="number" placeholder="0" />
           </Field>
-          <Field label="Input deshabilitado" hint="gris suave = no editable">
+          <Field label="Input deshabilitado">
             <Input value="No editable" disabled readOnly />
           </Field>
-          <Field label="Selector deshabilitado" hint="gris suave = no se puede abrir">
-            <Select value="a" disabled>
-              <option value="a">Opción fija</option>
-              <option value="b">Otra</option>
+          <Field label="Selector deshabilitado" hint="tono gris suave indica que no se puede usar">
+            <Select value="a" disabled onChange={() => {}}>
+              <option value="a">No editable</option>
             </Select>
-          </Field>
-          <Field label="Textarea deshabilitado">
-            <Textarea rows={2} value="Texto no editable" disabled readOnly />
           </Field>
           <div className="sm:col-span-2">
             <Field label="Área de texto">
               <Textarea rows={2} placeholder="Descripción…" />
             </Field>
           </div>
-          <div className="flex items-center gap-6">
-            <div className="flex items-center gap-3">
-              <Switch checked={sw} onChange={setSw} />
-              <span className="text-sm">Switch ({sw ? "on" : "off"})</span>
-            </div>
-            <div className="flex items-center gap-3">
-              <Switch checked disabled onChange={() => {}} />
-              <span className="text-sm text-muted">Switch deshabilitado</span>
-            </div>
+          <div className="flex items-center gap-3">
+            <Switch checked={sw} onChange={setSw} />
+            <span className="text-sm">Switch ({sw ? "on" : "off"})</span>
           </div>
         </div>
       </Card>

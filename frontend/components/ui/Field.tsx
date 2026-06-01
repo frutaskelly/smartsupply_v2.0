@@ -4,24 +4,25 @@ import {
   Children,
   forwardRef,
   isValidElement,
+  useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
 import { createPortal } from "react-dom";
 import { Check, ChevronDown } from "lucide-react";
 import type {
+  ChangeEvent,
   InputHTMLAttributes,
+  KeyboardEvent as ReactKeyboardEvent,
   ReactNode,
   SelectHTMLAttributes,
   TextareaHTMLAttributes,
 } from "react";
 
-// Deshabilitado: tono gris suave (relleno + texto atenuado + cursor), en vez de solo opacidad.
-const DISABLED =
-  "disabled:bg-surface-2 disabled:text-muted disabled:border-border disabled:cursor-not-allowed";
 const BASE =
-  `w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent ${DISABLED}`;
+  "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent disabled:opacity-60";
 
 export function Field({
   label,
@@ -58,140 +59,122 @@ export function Textarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Select — dropdown con el diseño de la app (NO el nativo del sistema operativo).
-// Mantiene la API de <select>: value + onChange(e => e.target.value) + <option> hijos.
-// El menú se renderiza en un portal para no recortarse dentro de modales/contenedores
-// con overflow. Navegable por teclado (↑/↓, Enter, Esc, Home/End, type-ahead).
+// Select — dropdown con el diseño de la app (no usa el <select> nativo del SO).
+// Mantiene la API del <select>: `value`, `onChange(e => e.target.value)`,
+// `disabled`, `className` y `<option>` como hijos. El panel se renderiza en un
+// portal con posición fija (flip arriba/abajo) para no recortarse en modales.
 // ─────────────────────────────────────────────────────────────────────────────
-type Opt = { value: string; label: ReactNode; disabled?: boolean };
+type Opt = { value: string; label: string; disabled: boolean };
 
-function nextEnabled(opts: Opt[], from: number, dir: 1 | -1): number {
-  const n = opts.length;
-  if (n === 0) return 0;
-  let i = from;
-  for (let step = 0; step < n; step++) {
-    i = (i + dir + n) % n;
-    if (!opts[i].disabled) return i;
-  }
-  return from < 0 ? 0 : Math.min(from, n - 1);
+/** Convierte los hijos de un <option> a texto plano (soporta strings concatenados). */
+function optionText(node: ReactNode): string {
+  if (node == null || node === false || node === true) return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(optionText).join("");
+  if (isValidElement(node)) return optionText((node.props as { children?: ReactNode }).children);
+  return "";
 }
 
-export function Select(props: SelectHTMLAttributes<HTMLSelectElement>) {
-  const {
-    className = "",
-    children,
-    value,
-    onChange,
-    disabled,
-    name,
-    id,
-    "aria-label": ariaLabel,
-  } = props;
-
-  // Lee las <option> hijas como items.
-  const opts: Opt[] = [];
+/** Recoge los <option> (incluidos los que vienen dentro de fragmentos / arrays). */
+function collectOptions(children: ReactNode, out: Opt[] = []): Opt[] {
   Children.forEach(children, (child) => {
-    if (isValidElement(child) && child.type === "option") {
-      const p = child.props as { value?: unknown; children?: ReactNode; disabled?: boolean };
-      const label = p.children;
-      const v = p.value ?? (typeof label === "string" ? label : "");
-      opts.push({ value: String(v), label, disabled: p.disabled });
+    if (!isValidElement(child)) return;
+    if (child.type === "option") {
+      const p = child.props as { value?: string | number; disabled?: boolean; children?: ReactNode };
+      const label = optionText(p.children);
+      out.push({ value: p.value !== undefined ? String(p.value) : label, label, disabled: !!p.disabled });
+    } else {
+      // Fragmentos u otros wrappers: baja un nivel.
+      collectOptions((child.props as { children?: ReactNode }).children, out);
     }
   });
+  return out;
+}
 
-  const val = value == null ? "" : String(value);
-  const selected = opts.find((o) => o.value === val);
+/** Siguiente índice habilitado en la dirección dada (salta deshabilitados). */
+function nextEnabled(opts: Opt[], from: number, dir: 1 | -1): number {
+  for (let i = from + dir; i >= 0 && i < opts.length; i += dir) {
+    if (!opts[i].disabled) return i;
+  }
+  return from >= 0 && from < opts.length && !opts[from]?.disabled ? from : from;
+}
+
+export function Select({
+  value,
+  onChange,
+  disabled,
+  className = "",
+  children,
+}: SelectHTMLAttributes<HTMLSelectElement>) {
+  const options = useMemo(() => collectOptions(children), [children]);
+  const current = value != null ? String(value) : "";
+  const selected = options.find((o) => o.value === current) ?? null;
 
   const [open, setOpen] = useState(false);
   const [hi, setHi] = useState(0);
-  const [coords, setCoords] = useState<{
-    left: number;
-    width: number;
-    top?: number;
-    bottom?: number;
-    maxH: number;
-  } | null>(null);
+  const [rect, setRect] = useState<{ left: number; top: number; width: number; maxHeight: number } | null>(null);
   const [mounted, setMounted] = useState(false);
-  const btnRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const taRef = useRef<{ buf: string; t: number }>({ buf: "", t: 0 });
+  const triggerRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => setMounted(true), []);
 
-  function reposition() {
-    const el = btnRef.current;
+  const place = useCallback(() => {
+    const el = triggerRef.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
     const gap = 4;
-    const spaceBelow = window.innerHeight - r.bottom - gap;
-    const spaceAbove = r.top - gap;
-    const desired = Math.min(288, opts.length * 40 + 8);
-    const openUp = spaceBelow < desired && spaceAbove > spaceBelow;
-    if (openUp) {
-      setCoords({ left: r.left, width: r.width, bottom: window.innerHeight - r.top + gap, maxH: Math.max(120, spaceAbove) });
-    } else {
-      setCoords({ left: r.left, width: r.width, top: r.bottom + gap, maxH: Math.max(120, spaceBelow) });
-    }
-  }
+    const spaceBelow = window.innerHeight - r.bottom - 8;
+    const spaceAbove = r.top - 8;
+    const desired = Math.min(options.length * 38 + 8, 288);
+    const up = spaceBelow < Math.min(desired, 160) && spaceAbove > spaceBelow;
+    const maxHeight = Math.max(120, Math.floor(up ? spaceAbove : spaceBelow));
+    const top = up ? r.top - gap - Math.min(desired, maxHeight) : r.bottom + gap;
+    setRect({ left: r.left, top, width: r.width, maxHeight });
+  }, [options.length]);
 
-  function openMenu() {
+  const openMenu = useCallback(() => {
     if (disabled) return;
-    reposition();
-    const idx = opts.findIndex((o) => o.value === val);
-    setHi(idx >= 0 ? idx : nextEnabled(opts, -1, 1));
+    place();
+    setHi(Math.max(options.findIndex((o) => o.value === current), 0));
     setOpen(true);
-  }
+  }, [disabled, place, options, current]);
 
+  // Cierre por clic fuera, Escape, scroll o resize (evita que el panel quede a la deriva).
   useEffect(() => {
     if (!open) return;
-    const onScrollResize = () => reposition();
-    const onDoc = (e: MouseEvent) => {
+    function onDown(e: MouseEvent) {
       const t = e.target as Node;
-      if (btnRef.current?.contains(t) || menuRef.current?.contains(t)) return;
+      if (triggerRef.current?.contains(t) || panelRef.current?.contains(t)) return;
       setOpen(false);
-    };
-    window.addEventListener("scroll", onScrollResize, true);
-    window.addEventListener("resize", onScrollResize);
-    document.addEventListener("mousedown", onDoc);
+    }
+    function onClose() {
+      setOpen(false);
+    }
+    document.addEventListener("mousedown", onDown);
+    window.addEventListener("resize", onClose);
+    window.addEventListener("scroll", onClose, true);
     return () => {
-      window.removeEventListener("scroll", onScrollResize, true);
-      window.removeEventListener("resize", onScrollResize);
-      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("mousedown", onDown);
+      window.removeEventListener("resize", onClose);
+      window.removeEventListener("scroll", onClose, true);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  // mantener el item resaltado a la vista
-  useEffect(() => {
-    if (!open) return;
-    menuRef.current?.querySelector(`[data-idx="${hi}"]`)?.scrollIntoView({ block: "nearest" });
-  }, [hi, open]);
-
-  function choose(o: Opt) {
+  function pick(o: Opt) {
     if (o.disabled) return;
-    onChange?.({ target: { value: o.value, name } } as unknown as React.ChangeEvent<HTMLSelectElement>);
+    onChange?.({
+      target: { value: o.value },
+      currentTarget: { value: o.value },
+    } as unknown as ChangeEvent<HTMLSelectElement>);
     setOpen(false);
-    btnRef.current?.focus();
+    triggerRef.current?.focus();
   }
 
-  function typeAhead(key: string) {
-    if (key.length !== 1) return;
-    taRef.current.buf += key.toLowerCase();
-    const buf = taRef.current.buf;
-    const idx = opts.findIndex(
-      (o) => !o.disabled && typeof o.label === "string" && o.label.toLowerCase().startsWith(buf),
-    );
-    if (idx >= 0) setHi(idx);
-    window.clearTimeout(taRef.current.t);
-    taRef.current.t = window.setTimeout(() => {
-      taRef.current.buf = "";
-    }, 600);
-  }
-
-  function onKeyDown(e: React.KeyboardEvent) {
+  function onKeyDown(e: ReactKeyboardEvent<HTMLDivElement>) {
     if (disabled) return;
     if (!open) {
-      if (["Enter", " ", "ArrowDown", "ArrowUp"].includes(e.key)) {
+      if (e.key === "Enter" || e.key === " " || e.key === "ArrowDown") {
         e.preventDefault();
         openMenu();
       }
@@ -199,118 +182,120 @@ export function Select(props: SelectHTMLAttributes<HTMLSelectElement>) {
     }
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      setHi((h) => nextEnabled(opts, h, 1));
+      setHi((h) => nextEnabled(options, h, 1));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
-      setHi((h) => nextEnabled(opts, h, -1));
+      setHi((h) => nextEnabled(options, h, -1));
     } else if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
-      const o = opts[hi];
-      if (o) choose(o);
+      const o = options[hi];
+      if (o) pick(o);
     } else if (e.key === "Escape") {
       e.preventDefault();
       setOpen(false);
-      btnRef.current?.focus();
     } else if (e.key === "Home") {
       e.preventDefault();
-      setHi(nextEnabled(opts, -1, 1));
+      setHi(nextEnabled(options, -1, 1));
     } else if (e.key === "End") {
       e.preventDefault();
-      setHi(nextEnabled(opts, opts.length, -1));
-    } else {
-      typeAhead(e.key);
+      setHi(nextEnabled(options, options.length, -1));
     }
   }
 
   return (
-    <>
-      <button
-        ref={btnRef}
-        type="button"
-        id={id}
-        name={name}
-        disabled={disabled}
+    <div className="relative">
+      <div
+        ref={triggerRef}
+        role="combobox"
         aria-haspopup="listbox"
         aria-expanded={open}
-        aria-label={ariaLabel}
+        aria-disabled={disabled || undefined}
+        tabIndex={disabled ? -1 : 0}
         onClick={() => (open ? setOpen(false) : openMenu())}
         onKeyDown={onKeyDown}
-        className={`${BASE} flex items-center justify-between gap-2 text-left ${className}`}
+        className={`flex w-full items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm outline-none transition ${
+          disabled
+            ? "cursor-not-allowed border-border bg-surface-2 text-muted"
+            : `cursor-pointer border-border bg-background hover:border-accent/60 focus:border-accent ${
+                open ? "border-accent" : ""
+              }`
+        } ${className}`}
       >
-        <span className={`truncate ${val === "" || !selected ? "text-muted" : ""}`}>
-          {selected ? selected.label : "Selecciona…"}
+        <span className={`truncate ${selected ? "" : "text-muted"}`}>
+          {selected ? selected.label : " "}
         </span>
         <ChevronDown
           size={15}
           className={`shrink-0 text-muted transition-transform ${open ? "rotate-180" : ""}`}
         />
-      </button>
+      </div>
 
-      {open && mounted && coords &&
+      {mounted &&
+        open &&
+        rect &&
         createPortal(
           <div
-            ref={menuRef}
+            ref={panelRef}
             role="listbox"
             style={{
               position: "fixed",
-              left: coords.left,
-              width: coords.width,
-              top: coords.top,
-              bottom: coords.bottom,
-              maxHeight: coords.maxH,
+              left: rect.left,
+              top: rect.top,
+              width: rect.width,
+              maxHeight: rect.maxHeight,
+              zIndex: 50,
             }}
-            className="z-50 overflow-auto rounded-lg border border-border bg-surface py-1 shadow-lg"
+            className="overflow-auto rounded-lg border border-border bg-surface shadow-lg"
           >
-            {opts.length === 0 ? (
+            {options.length === 0 ? (
               <div className="px-3 py-2 text-sm text-muted">Sin opciones</div>
             ) : (
-              opts.map((o, i) => (
-                <button
-                  key={i}
-                  data-idx={i}
-                  type="button"
-                  role="option"
-                  aria-selected={o.value === val}
-                  disabled={o.disabled}
-                  onMouseEnter={() => !o.disabled && setHi(i)}
-                  onClick={() => choose(o)}
-                  className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm ${
-                    o.disabled
-                      ? "cursor-not-allowed text-muted/60"
-                      : i === hi
-                        ? "bg-accent/10"
-                        : "hover:bg-surface-2"
-                  } ${o.value === val ? "font-medium" : ""}`}
-                >
-                  <span className="truncate">{o.label}</span>
-                  {o.value === val && <Check size={15} className="shrink-0 text-accent" />}
-                </button>
-              ))
+              options.map((o, i) => {
+                const isSel = o.value === current;
+                return (
+                  <button
+                    key={`${o.value}-${i}`}
+                    type="button"
+                    role="option"
+                    aria-selected={isSel}
+                    disabled={o.disabled}
+                    onClick={() => pick(o)}
+                    onMouseEnter={() => !o.disabled && setHi(i)}
+                    className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm ${
+                      o.disabled
+                        ? "cursor-not-allowed text-muted/60"
+                        : i === hi
+                          ? "bg-accent/10"
+                          : "hover:bg-surface-2"
+                    }`}
+                  >
+                    <span className="truncate">{o.label}</span>
+                    {isSel && <Check size={15} className="shrink-0 text-accent" />}
+                  </button>
+                );
+              })
             )}
           </div>,
-          document.body,
+          document.body
         )}
-    </>
+    </div>
   );
 }
 
 export function Switch({
   checked,
   onChange,
-  disabled,
 }: {
   checked: boolean;
   onChange: (v: boolean) => void;
-  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={checked}
-      disabled={disabled}
       onClick={() => onChange(!checked)}
-      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition disabled:cursor-not-allowed disabled:opacity-50 ${
+      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition ${
         checked ? "bg-accent" : "bg-border"
       }`}
     >
