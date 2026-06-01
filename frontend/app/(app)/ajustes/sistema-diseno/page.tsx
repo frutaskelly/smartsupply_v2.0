@@ -31,6 +31,9 @@ const DEMO_ROWS: Demo[] = [
   { id: 1, nombre: "Jitomate saladette", estado: "Activo" },
   { id: 2, nombre: "Aceite Nutrioli 850 ml", estado: "Activo" },
   { id: 3, nombre: "Coca-Cola 600 ml", estado: "Inactivo" },
+  { id: 4, nombre: "Plátano Tabasco", estado: "Activo" },
+  { id: 5, nombre: "Lechuga romana", estado: "Activo" },
+  { id: 6, nombre: "Papel higiénico 4 rollos", estado: "Inactivo" },
 ];
 
 export default function SistemaDisenoPage() {
@@ -40,11 +43,13 @@ export default function SistemaDisenoPage() {
   const [confirm, setConfirm] = useState(false);
 
   const cols: Column<Demo>[] = [
-    { header: "ID", cell: (r) => r.id, className: "w-1" },
-    { header: "Nombre", cell: (r) => <span className="font-medium">{r.nombre}</span> },
+    { header: "ID", cell: (r) => r.id, className: "w-1", sortable: true, sortValue: (r) => r.id },
+    { header: "Nombre", cell: (r) => <span className="font-medium">{r.nombre}</span>, sortable: true, sortValue: (r) => r.nombre },
     {
       header: "Estado",
       cell: (r) => <Badge tone={r.estado === "Activo" ? "success" : "muted"}>{r.estado}</Badge>,
+      sortable: true,
+      sortValue: (r) => r.estado,
     },
   ];
 
@@ -182,7 +187,13 @@ export default function SistemaDisenoPage() {
 
       {/* Tabla */}
       <Card title="DataTable">
-        <DataTable columns={cols} rows={DEMO_ROWS} empty="Sin datos" />
+        <p className="mb-3 text-sm text-muted">
+          <b>Buscar</b> filtra en todas las columnas (sin acentos, por palabras). Clic en el encabezado para
+          ordenar (asc → desc → sin orden). Botón <b>Columnas</b> para mostrar/ocultar y reordenar arrastrando.
+          Arrastra el <b>borde derecho</b> de un encabezado para el ancho. Botón <b>Excel</b> para descargar.
+          Todo se recuerda por tabla.
+        </p>
+        <DataTable columns={cols} rows={DEMO_ROWS} empty="Sin datos" searchable searchPlaceholder="Buscar producto…" columnsMenu resizable exportable exportFilename="demo" storageKey="demo-sistema-diseno" />
       </Card>
 
       <Modal
