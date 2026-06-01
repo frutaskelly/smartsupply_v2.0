@@ -32,9 +32,11 @@ export function ProductoCombobox({
   const [cands, setCands] = useState<Candidato[]>([]);
   const [loading, setLoading] = useState(false);
   const [iaTried, setIaTried] = useState(false);
+  const [hi, setHi] = useState(0);
   const boxRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => setQ(label ?? ""), [label]);
+  useEffect(() => setHi(0), [cands]);
 
   useEffect(() => {
     if (!open) return;
@@ -123,6 +125,12 @@ export function ProductoCombobox({
           onSelect(null, e.target.value); // limpia la selección mientras escribe
         }}
         onFocus={() => setOpen(true)}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowDown") { e.preventDefault(); setOpen(true); setHi((h) => Math.min(h + 1, Math.max(cands.length - 1, 0))); }
+          else if (e.key === "ArrowUp") { e.preventDefault(); setHi((h) => Math.max(h - 1, 0)); }
+          else if (e.key === "Enter") { if (cands[hi]) { e.preventDefault(); pick(cands[hi]); } }
+          else if (e.key === "Escape") setOpen(false);
+        }}
       />
       {open && q.trim().length >= 2 && (
         <div className="absolute z-20 mt-1 max-h-72 w-full overflow-auto rounded-lg border border-border bg-surface shadow-lg">
@@ -142,12 +150,13 @@ export function ProductoCombobox({
             </div>
           )}
           {!loading &&
-            cands.map((c) => (
+            cands.map((c, i) => (
               <button
                 key={c.producto_id}
                 type="button"
                 onClick={() => pick(c)}
-                className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-surface-2"
+                onMouseEnter={() => setHi(i)}
+                className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm ${i === hi ? "bg-accent/10" : "hover:bg-surface-2"}`}
               >
                 <span>
                   <span className="font-medium">{c.nombre}</span>

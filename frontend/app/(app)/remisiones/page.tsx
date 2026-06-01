@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ClipboardPaste, FileText, Plus, Trash2, X } from "lucide-react";
 
+import { KeyboardCombobox, type ComboOption } from "@/components/KeyboardCombobox";
 import { ProductoCombobox, type ProductoPick } from "@/components/ProductoCombobox";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -92,15 +93,9 @@ export default function RemisionesPage() {
   const [notas, setNotas] = useState("");
   const [lineas, setLineas] = useState<LineaForm[]>([nuevaLinea()]);
   const [pasteOpen, setPasteOpen] = useState(false);
-
-  // sucursales del cliente elegido
   const [sucursales, setSucursales] = useState<Sucursal[]>([]);
-  useEffect(() => {
-    if (!clienteId) { setSucursales([]); setSucursalId(""); return; }
-    apiFetch<Page<Sucursal>>(`/api/v1/sucursales?cliente_id=${clienteId}&limit=200`)
-      .then((r) => setSucursales(r.items))
-      .catch(() => setSucursales([]));
-  }, [clienteId]);
+  // paso del flujo por teclado: cuál caja se auto-abre/enfoca
+  const [step, setStep] = useState<"cliente" | "sucursal" | "almacen" | "serie" | "lineas" | null>(null);
 
   // series de remisión (para override) + preview de la serie que aplicaría
   const seriesRemRes = useResource<Page<Serie>>("/api/v1/series?tipo_documento=REMISION&activa=true&limit=200");
@@ -119,9 +114,60 @@ export default function RemisionesPage() {
   const folioPreview = serieResuelta ? `${serieResuelta.codigo}${serieResuelta.folio_actual + 1}` : "—";
   const totalPreview = lineas.reduce((s, l) => s + (l.importe || 0), 0);
 
+  // opciones para los comboboxes
+  const clienteOpts: ComboOption[] = useMemo(() => clientes.map((c) => ({ value: c.id, label: c.legal_name })), [clientes]);
+  const sucursalOpts: ComboOption[] = useMemo(() => sucursales.map((s) => ({ value: s.id, label: s.nombre })), [sucursales]);
+  const almacenOpts: ComboOption[] = useMemo(() => almacenes.map((a) => ({ value: a.id, label: a.nombre })), [almacenes]);
+  const serieOpts: ComboOption[] = useMemo(
+    () => [
+      { value: "", label: `Automática${serieResuelta ? ` · ${serieResuelta.codigo}` : ""}` },
+      ...seriesRem.map((s) => ({ value: s.id, label: `${s.codigo}${s.nombre ? ` · ${s.nombre}` : ""}` })),
+    ],
+    [seriesRem, serieResuelta],
+  );
+
+  const today = () => new Date().toISOString().slice(0, 10);
+
+  // Avanza al siguiente campo saltando los que tienen 0 o 1 opción (auto-selección).
+  function resolveFrom(target: "sucursal" | "almacen" | "serie" | "lineas", sucs = sucursales, alms = almacenes) {
+    if (target === "sucursal") {
+      if (sucs.length === 0) { setSucursalId(""); return resolveFrom("almacen", sucs, alms); }
+      if (sucs.length === 1) { setSucursalId(sucs[0].id); return resolveFrom("almacen", sucs, alms); }
+      return setStep("sucursal");
+    }
+    if (target === "almacen") {
+      if (alms.length === 0) { setAlmacenId(""); return resolveFrom("serie", sucs, alms); }
+      if (alms.length === 1) { setAlmacenId(alms[0].id); return resolveFrom("serie", sucs, alms); }
+      return setStep("almacen");
+    }
+    if (target === "serie") {
+      if (!fecha) setFecha(today());
+      return setStep("serie");
+    }
+    return setStep("lineas");
+  }
+
+  async function selectCliente(v: string) {
+    setClienteId(v);
+    setStep(null);
+    const cli = clientes.find((c) => c.id === v);
+    setSerieOverride(cli?.serie_remision_id ?? "");   // la serie del cliente se aplica sola
+    let sucs: Sucursal[] = [];
+    try {
+      sucs = (await apiFetch<Page<Sucursal>>(`/api/v1/sucursales?cliente_id=${v}&limit=200`)).items;
+    } catch {
+      sucs = [];
+    }
+    setSucursales(sucs);
+    resolveFrom("sucursal", sucs);
+  }
+
   function openCreate() {
-    setClienteId(""); setSucursalId(""); setAlmacenId(""); setFecha(""); setSerieOverride("");
-    setNotas(""); setLineas([nuevaLinea()]); setMode("create");
+    setClienteId(""); setSucursalId(""); setAlmacenId(""); setSerieOverride("");
+    setSucursales([]); setNotas(""); setLineas([nuevaLinea()]);
+    setFecha(today());            // fecha de hoy por defecto (el flujo la salta)
+    setMode("create");
+    setStep("cliente");           // arranca con el cliente abierto
   }
 
   function setLinea(key: string, patch: Partial<LineaForm>) {
@@ -314,33 +360,55 @@ export default function RemisionesPage() {
           actions={<Button variant="secondary" onClick={() => setMode("list")}><X size={16} /> Cancelar</Button>}
         />
 
-        <div className="grid grid-cols-1 gap-4 rounded-xl border border-border p-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Field label="Cliente" required>
-            <Select value={clienteId} onChange={(e) => setClienteId(e.target.value)}>
-              <option value="">— Selecciona —</option>
-              {clientes.map((c) => <option key={c.id} value={c.id}>{c.legal_name}</option>)}
-            </Select>
+        <div className="grid grid-cols-1 gap-4 rounded-xl border border-border p-4 sm:grid-cols-2 lg:grid-cols-3">
+          <Field label="Cliente" required hint="Escribe y usa ↑/↓ · Enter para seleccionar y avanzar">
+            <KeyboardCombobox
+              options={clienteOpts}
+              value={clienteId}
+              onSelect={(v) => selectCliente(v)}
+              autoOpen={step === "cliente"}
+              placeholder="Buscar cliente…"
+              emptyText="Sin clientes"
+            />
           </Field>
           <Field label="Sucursal">
-            <Select value={sucursalId} onChange={(e) => setSucursalId(e.target.value)} disabled={!sucursales.length}>
-              <option value="">(matriz / sin sucursal)</option>
-              {sucursales.map((s) => <option key={s.id} value={s.id}>{s.nombre}</option>)}
-            </Select>
+            <KeyboardCombobox
+              options={sucursalOpts}
+              value={sucursalId}
+              onSelect={setSucursalId}
+              onAdvance={() => resolveFrom("almacen")}
+              autoOpen={step === "sucursal"}
+              placeholder="(matriz / sin sucursal)"
+              emptyText="Sin sucursales"
+              disabled={!clienteId}
+            />
           </Field>
           <Field label="Almacén">
-            <Select value={almacenId} onChange={(e) => setAlmacenId(e.target.value)}>
-              <option value="">— Selecciona —</option>
-              {almacenes.map((a) => <option key={a.id} value={a.id}>{a.nombre}</option>)}
-            </Select>
+            <KeyboardCombobox
+              options={almacenOpts}
+              value={almacenId}
+              onSelect={setAlmacenId}
+              onAdvance={() => resolveFrom("serie")}
+              autoOpen={step === "almacen"}
+              placeholder="Sin almacén"
+              emptyText="Sin almacén"
+            />
           </Field>
           <Field label="Fecha">
             <Input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} />
           </Field>
-          <Field label="Serie" hint={`Folio: ${folioPreview}`}>
-            <Select value={serieOverride} onChange={(e) => setSerieOverride(e.target.value)}>
-              <option value="">(automática)</option>
-              {seriesRem.map((s) => <option key={s.id} value={s.id}>{s.codigo}{s.nombre ? ` · ${s.nombre}` : ""}</option>)}
-            </Select>
+          <Field label="Serie">
+            <KeyboardCombobox
+              options={serieOpts}
+              value={serieOverride}
+              onSelect={setSerieOverride}
+              onAdvance={() => resolveFrom("lineas")}
+              autoOpen={step === "serie"}
+              placeholder="Serie…"
+            />
+          </Field>
+          <Field label="Consecutivo (informativo)">
+            <Input value={folioPreview} readOnly disabled aria-label="Folio consecutivo" />
           </Field>
         </div>
 
@@ -361,10 +429,14 @@ export default function RemisionesPage() {
               <div className="col-span-2">Precio</div>
               <div className="col-span-1 text-right">Importe</div>
             </div>
-            {lineas.map((l) => (
+            {lineas.map((l, i) => (
               <div key={l.key} className="grid grid-cols-12 items-start gap-2">
                 <div className="col-span-12 sm:col-span-5">
-                  <ProductoCombobox label={l.label || l.texto} onSelect={(p, t) => onPickProducto(l.key, p, t)} />
+                  <ProductoCombobox
+                    label={l.label || l.texto}
+                    onSelect={(p, t) => onPickProducto(l.key, p, t)}
+                    autoFocus={step === "lineas" && i === 0}
+                  />
                 </div>
                 <div className="col-span-4 sm:col-span-2">
                   <Select
