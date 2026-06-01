@@ -2,7 +2,9 @@
 
 import { CrudPage, type CrudConfig } from "@/components/crud/CrudPage";
 import { Badge } from "@/components/ui/Badge";
-import type { Almacen } from "@/lib/types";
+import { apiFetch } from "@/lib/api";
+import { fmtNumber } from "@/lib/format";
+import type { Almacen, ExistenciaRow } from "@/lib/types";
 
 const config: CrudConfig<Almacen> = {
   title: "Almacenes",
@@ -53,6 +55,24 @@ const config: CrudConfig<Almacen> = {
     es_default: v.es_default,
   }),
   rowLabel: (a) => a.nombre,
+  // Advierte si el almacén tiene existencias (eliminarlo desconectaría el inventario).
+  deleteWarning: async (a) => {
+    try {
+      const rows = await apiFetch<ExistenciaRow[]>(`/api/v1/inventario/existencias?almacen_id=${a.id}`);
+      const total = rows.reduce((s, r) => s + Number(r.disponible), 0);
+      const prods = rows.filter((r) => Number(r.disponible) > 0).length;
+      if (total > 0) {
+        return (
+          `"${a.nombre}" tiene inventario activo: ${prods} producto(s) con ${fmtNumber(total)} unidades. ` +
+          `Si lo eliminas, ese inventario quedará desconectado y desaparecerá de las existencias. ` +
+          `Alternativa recomendada: transfiere el inventario a otro almacén (o ajústalo a 0) antes de eliminarlo.`
+        );
+      }
+    } catch {
+      /* si falla la consulta, no bloquea el diálogo normal */
+    }
+    return null;
+  },
 };
 
 export default function Page() {

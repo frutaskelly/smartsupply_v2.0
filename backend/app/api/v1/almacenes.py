@@ -10,12 +10,12 @@ from __future__ import annotations
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ...core.rbac import AuthContext, get_tenant_db, require_permission
-from ...models import Almacen
+from ...models import Almacen, LoteInventario
 from ...schemas.almacen import AlmacenCreate, AlmacenOut, AlmacenUpdate
 from ...schemas.common import Page
 from ._helpers import flush_or_conflict, get_or_404, paginate
@@ -98,10 +98,33 @@ def update_almacen(
 @router.delete("/{almacen_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_almacen(
     almacen_id: UUID,
+    force: bool = Query(default=False, description="Eliminar aunque tenga inventario (riesgoso)"),
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_WRITE)),
 ):
     obj = get_or_404(db, Almacen, almacen_id)
+    # Guard: no permitir eliminar un almacén con existencias — desconectaría el
+    # inventario (los lotes apuntan a este almacén). El usuario debe transferir o
+    # ajustar a 0 primero. `force=true` es el escape para casos excepcionales.
+    if not force:
+        n_prod, disp = (
+            db.query(
+                func.count(func.distinct(LoteInventario.producto_id)),
+                func.coalesce(func.sum(LoteInventario.cantidad_disponible), 0),
+            )
+            .filter(LoteInventario.almacen_id == almacen_id)
+            .one()
+        )
+        if disp and disp > 0:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"\"{obj.nombre}\" tiene inventario activo: {int(n_prod)} producto(s) "
+                    f"con {float(disp):g} unidades en existencia. Si lo eliminas, ese "
+                    f"inventario quedará desconectado. Transfiere o ajusta a 0 esas "
+                    f"existencias antes de eliminar el almacén."
+                ),
+            )
     obj.deleted_at = func.now()
     db.flush()
     return None
