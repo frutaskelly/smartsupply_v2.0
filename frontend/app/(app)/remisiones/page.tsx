@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ClipboardPaste, FileText, Plus, Trash2, X } from "lucide-react";
 
 import { KeyboardCombobox, type ComboOption } from "@/components/KeyboardCombobox";
@@ -144,7 +144,8 @@ export default function RemisionesPage() {
       if (!fecha) setFecha(today());
       return setStep("serie");
     }
-    return setStep("lineas");
+    setStep("lineas");
+    setLineFocus({ key: lineas[0]?.key, field: "producto" });   // enfoca la primera línea
   }
 
   async function selectCliente(v: string) {
@@ -172,6 +173,33 @@ export default function RemisionesPage() {
 
   function setLinea(key: string, patch: Partial<LineaForm>) {
     setLineas((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
+  }
+
+  // ── foco encadenado dentro de las líneas (producto → presentación → cantidad → precio → siguiente) ──
+  type LineField = "producto" | "presentacion" | "cantidad" | "precio";
+  const [lineFocus, setLineFocus] = useState<{ key: string; field: LineField } | null>(null);
+  const cellRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  useEffect(() => {
+    if (!lineFocus) return;
+    if (lineFocus.field === "cantidad" || lineFocus.field === "precio") {
+      const el = cellRefs.current[`${lineFocus.key}:${lineFocus.field}`];
+      el?.focus();
+      el?.select();
+    }
+  }, [lineFocus]);
+
+  function advanceLine(key: string, from: LineField) {
+    if (from === "producto") return setLineFocus({ key, field: "presentacion" });
+    if (from === "presentacion") return setLineFocus({ key, field: "cantidad" });
+    if (from === "cantidad") return setLineFocus({ key, field: "precio" });
+    // precio → siguiente línea (o crea una nueva si es la última)
+    const idx = lineas.findIndex((l) => l.key === key);
+    if (idx === lineas.length - 1) {
+      const nl = nuevaLinea();
+      setLineas((ls) => [...ls, nl]);
+      return setLineFocus({ key: nl.key, field: "producto" });
+    }
+    return setLineFocus({ key: lineas[idx + 1].key, field: "producto" });
   }
 
   async function cotizar(key: string, producto_id: string, presentacion: string, cantidad: string) {
@@ -212,6 +240,7 @@ export default function RemisionesPage() {
     });
     const ln = lineas.find((l) => l.key === key);
     cotizar(key, pick.producto_id, presentacion, ln?.cantidad ?? "1");
+    setLineFocus({ key, field: "presentacion" });   // Enter en producto → presentación
   }
 
   // ── pegar como Excel ──
@@ -429,33 +458,39 @@ export default function RemisionesPage() {
               <div className="col-span-2">Precio</div>
               <div className="col-span-1 text-right">Importe</div>
             </div>
-            {lineas.map((l, i) => (
+            {lineas.map((l) => (
               <div key={l.key} className="grid grid-cols-12 items-start gap-2">
                 <div className="col-span-12 sm:col-span-5">
                   <ProductoCombobox
                     label={l.label || l.texto}
                     onSelect={(p, t) => onPickProducto(l.key, p, t)}
-                    autoFocus={step === "lineas" && i === 0}
+                    autoFocus={lineFocus?.key === l.key && lineFocus?.field === "producto"}
                   />
                 </div>
                 <div className="col-span-4 sm:col-span-2">
-                  <Select
+                  <KeyboardCombobox
+                    options={(l.presentaciones.length ? l.presentaciones : [l.presentacion]).map((p) => ({ value: p, label: p }))}
                     value={l.presentacion}
-                    onChange={(e) => { setLinea(l.key, { presentacion: e.target.value }); cotizar(l.key, l.producto_id, e.target.value, l.cantidad); }}
-                  >
-                    {(l.presentaciones.length ? l.presentaciones : [l.presentacion]).map((p) => <option key={p} value={p}>{p}</option>)}
-                  </Select>
+                    onSelect={(v) => { setLinea(l.key, { presentacion: v }); cotizar(l.key, l.producto_id, v, l.cantidad); }}
+                    onAdvance={() => advanceLine(l.key, "presentacion")}
+                    autoOpen={lineFocus?.key === l.key && lineFocus?.field === "presentacion"}
+                    placeholder="Presentación"
+                  />
                 </div>
                 <div className="col-span-3 sm:col-span-2">
                   <Input
                     inputMode="decimal" value={l.cantidad}
+                    ref={(el) => { cellRefs.current[`${l.key}:cantidad`] = el; }}
                     onChange={(e) => { const v = e.target.value.replace(",", "."); setLinea(l.key, { cantidad: v, importe: Number(l.precio || 0) * Number(v || 0) }); cotizar(l.key, l.producto_id, l.presentacion, v); }}
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); advanceLine(l.key, "cantidad"); } }}
                   />
                 </div>
                 <div className="col-span-3 sm:col-span-2">
                   <Input
                     inputMode="decimal" placeholder="auto" value={l.precio}
+                    ref={(el) => { cellRefs.current[`${l.key}:precio`] = el; }}
                     onChange={(e) => { const v = e.target.value.replace(",", "."); setLinea(l.key, { precio: v, precioManual: true, importe: Number(v || 0) * Number(l.cantidad || 0) }); }}
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); advanceLine(l.key, "precio"); } }}
                   />
                 </div>
                 <div className="col-span-2 flex items-center justify-end gap-1 sm:col-span-1">

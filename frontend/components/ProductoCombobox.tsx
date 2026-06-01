@@ -34,9 +34,17 @@ export function ProductoCombobox({
   const [iaTried, setIaTried] = useState(false);
   const [hi, setHi] = useState(0);
   const boxRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => setQ(label ?? ""), [label]);
   useEffect(() => setHi(0), [cands]);
+  // Enfoca cuando el flujo encadenado apunta a esta caja (no solo al montar).
+  useEffect(() => {
+    if (autoFocus) {
+      inputRef.current?.focus();
+      setOpen(true);
+    }
+  }, [autoFocus]);
 
   useEffect(() => {
     if (!open) return;
@@ -114,6 +122,7 @@ export function ProductoCombobox({
   return (
     <div ref={boxRef} className="relative">
       <input
+        ref={inputRef}
         className={BASE}
         aria-label="Buscar producto"
         value={q}

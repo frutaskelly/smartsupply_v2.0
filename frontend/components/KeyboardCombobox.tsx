@@ -48,15 +48,15 @@ export function KeyboardCombobox({
     return options.filter((o) => o.label.toLowerCase().includes(q));
   }, [options, query]);
 
-  // autoOpen: enfoca + abre + limpia para escribir
+  // autoOpen: enfoca + abre + limpia para escribir, resaltando el valor actual
   useEffect(() => {
     if (autoOpen && !disabled) {
       inputRef.current?.focus();
       setOpen(true);
       setQuery("");
-      setHi(0);
+      setHi(Math.max(options.findIndex((o) => o.value === value), 0));
     }
-  }, [autoOpen, disabled]);
+  }, [autoOpen, disabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // mantener el resaltado a la vista
   useEffect(() => {
@@ -125,7 +125,7 @@ export function KeyboardCombobox({
         onFocus={() => {
           setOpen(true);
           setQuery("");
-          setHi(0);
+          setHi(Math.max(options.findIndex((o) => o.value === value), 0));
         }}
         onBlur={() => setTimeout(() => setOpen(false), 120)}
         onKeyDown={onKeyDown}

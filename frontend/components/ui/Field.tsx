@@ -1,5 +1,6 @@
 "use client";
 
+import { forwardRef } from "react";
 import type {
   InputHTMLAttributes,
   ReactNode,
@@ -33,10 +34,11 @@ export function Field({
   );
 }
 
-export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
-  const { className = "", ...rest } = props;
-  return <input {...rest} className={`${BASE} ${className}`} />;
-}
+export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(
+  function Input({ className = "", ...rest }, ref) {
+    return <input ref={ref} {...rest} className={`${BASE} ${className}`} />;
+  },
+);
 
 export function Textarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
   const { className = "", ...rest } = props;
