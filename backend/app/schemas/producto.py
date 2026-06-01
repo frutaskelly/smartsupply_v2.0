@@ -95,6 +95,9 @@ class CandidatoOut(BaseModel):
     nombre: str
     score: int
     origen: str                   # exacto | alias | difuso | ia
+    presentaciones: dict = {}
+    presentacion_default: Optional[str] = None
+    unidad_base: Optional[str] = None
 
 
 class MatchResultOut(BaseModel):

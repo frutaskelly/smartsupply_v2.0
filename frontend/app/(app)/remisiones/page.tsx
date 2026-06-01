@@ -17,7 +17,7 @@ import { ApiError, apiFetch } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import { fmtDate, fmtMoney, fmtNumber } from "@/lib/format";
 import { useMutation, useResource, type Page } from "@/lib/hooks";
-import type { Almacen, Cliente, Producto, Remision, RemisionDetail, Serie, Sucursal } from "@/lib/types";
+import type { Almacen, Cliente, MatchResult, Producto, Remision, RemisionDetail, Serie, Sucursal } from "@/lib/types";
 
 const WRITE = "remision:gestionar";
 
@@ -46,7 +46,7 @@ const nuevaLinea = (over: Partial<LineaForm> = {}): LineaForm => ({
   texto: "",
   producto_id: "",
   label: "",
-  presentacion: "KILO",
+  presentacion: "",
   presentaciones: [],
   cantidad: "1",
   precio: "",
@@ -227,13 +227,14 @@ export default function RemisionesPage() {
       setLinea(key, { producto_id: "", label: "", texto });
       return;
     }
-    const prod = prodById[pick.producto_id];
-    const pres = prod ? Object.keys(prod.presentaciones ?? {}) : [];
-    const def = prod?.presentacion_default ?? prod?.unidad_base ?? pres[0] ?? "KILO";
-    const presentacion = pres.includes(def) ? def : pres[0] ?? "KILO";
+    // La presentación viene del propio producto (no de un fetch separado), así el
+    // default real (p. ej. PIEZA) se respeta y el precio se cotiza con la presentación correcta.
+    const pres = Object.keys(pick.presentaciones ?? {});
+    const def = pick.presentacion_default ?? pick.unidad_base ?? pres[0] ?? "PIEZA";
+    const presentacion = pres.includes(def) ? def : pres[0] ?? def;
     setLinea(key, {
       producto_id: pick.producto_id,
-      label: `${pick.sku} · ${pick.nombre}`,
+      label: pick.nombre,        // sin SKU
       texto,
       presentaciones: pres,
       presentacion,
@@ -253,7 +254,7 @@ export default function RemisionesPage() {
       .map((r) => r.split("\t").map((c) => c.trim()));
     if (filas.length === 0) return;
     const textos = filas.map((c) => c[0]);
-    let matches: { texto: string; candidatos: { producto_id: string; sku: string; nombre: string; score: number; origen: string }[] }[] = [];
+    let matches: MatchResult[] = [];
     try {
       matches = await apiFetch("/api/v1/productos/match", {
         method: "POST",
@@ -269,16 +270,15 @@ export default function RemisionesPage() {
       const top = matches[i]?.candidatos?.[0];
       const auto = top && (top.origen === "exacto" || top.origen === "alias" || top.score >= 85) ? top : null;
       if (auto) {
-        const prod = prodById[auto.producto_id];
-        const presKeys = prod ? Object.keys(prod.presentaciones ?? {}) : [];
-        const def = prod?.presentacion_default ?? prod?.unidad_base ?? presKeys[0] ?? "KILO";
-        const presentacion = presIn && presKeys.includes(presIn) ? presIn : presKeys.includes(def) ? def : presKeys[0] ?? "KILO";
+        const presKeys = Object.keys(auto.presentaciones ?? {});
+        const def = auto.presentacion_default ?? auto.unidad_base ?? presKeys[0] ?? "PIEZA";
+        const presentacion = presIn && presKeys.includes(presIn) ? presIn : presKeys.includes(def) ? def : presKeys[0] ?? def;
         return nuevaLinea({
-          texto, producto_id: auto.producto_id, label: `${auto.sku} · ${auto.nombre}`,
+          texto, producto_id: auto.producto_id, label: auto.nombre,
           presentaciones: presKeys, presentacion, cantidad,
         });
       }
-      return nuevaLinea({ texto, cantidad, presentacion: presIn || "KILO" }); // sin resolver → el usuario confirma
+      return nuevaLinea({ texto, cantidad, presentacion: presIn }); // sin resolver → el usuario confirma
     });
     setLineas((ls) => {
       const base = ls.filter((l) => l.producto_id || l.texto);

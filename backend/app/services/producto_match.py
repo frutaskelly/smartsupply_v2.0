@@ -43,6 +43,18 @@ class Candidato:
     nombre: str
     score: int            # 0-100
     origen: str           # exacto | alias | difuso | ia
+    presentaciones: dict
+    presentacion_default: Optional[str]
+    unidad_base: Optional[str]
+
+
+def _cand(p: Producto, score: int, origen: str) -> "Candidato":
+    return Candidato(
+        producto_id=p.id, sku=p.sku, nombre=p.nombre, score=score, origen=origen,
+        presentaciones=p.presentaciones or {},
+        presentacion_default=p.presentacion_default,
+        unidad_base=p.unidad_base,
+    )
 
 
 def _productos_activos(db: Session) -> list[Producto]:
@@ -61,7 +73,7 @@ def buscar(db: Session, tenant_id: UUID, texto: str, *, limit: int = 5) -> list[
     # 1) exacto por nombre o sku
     for p in prods:
         if normalizar(p.nombre) == norm or normalizar(p.sku) == norm:
-            return [Candidato(p.id, p.sku, p.nombre, 100, "exacto")]
+            return [_cand(p, 100, "exacto")]
 
     # 2) alias aprendido
     alias = (
@@ -70,8 +82,7 @@ def buscar(db: Session, tenant_id: UUID, texto: str, *, limit: int = 5) -> list[
         .one_or_none()
     )
     if alias is not None and alias.producto_id in by_id:
-        p = by_id[alias.producto_id]
-        return [Candidato(p.id, p.sku, p.nombre, 100, "alias")]
+        return [_cand(by_id[alias.producto_id], 100, "alias")]
 
     # 3) difuso sobre nombre + sinónimos (mejor score por producto)
     choices: dict[str, UUID] = {}
@@ -92,8 +103,7 @@ def buscar(db: Session, tenant_id: UUID, texto: str, *, limit: int = 5) -> list[
     for pid, score in ordered:
         if score < _FUZZY_FLOOR:
             continue
-        p = by_id[pid]
-        out.append(Candidato(p.id, p.sku, p.nombre, score, "difuso"))
+        out.append(_cand(by_id[pid], score, "difuso"))
         if len(out) >= limit:
             break
     return out

@@ -9,7 +9,14 @@ import type { Candidato, MatchResult } from "@/lib/types";
 const BASE =
   "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent disabled:opacity-60";
 
-export type ProductoPick = { producto_id: string; sku: string; nombre: string };
+export type ProductoPick = {
+  producto_id: string;
+  sku: string;
+  nombre: string;
+  presentaciones: Record<string, number>;
+  presentacion_default?: string | null;
+  unidad_base?: string | null;
+};
 
 /**
  * Buscador de producto con cruce inteligente (exacto → alias aprendido → difuso → IA).
@@ -103,8 +110,12 @@ export function ProductoCombobox({
 
   async function pick(c: Candidato) {
     const texto = q.trim();
-    onSelect({ producto_id: c.producto_id, sku: c.sku, nombre: c.nombre }, texto);
-    setQ(`${c.sku} · ${c.nombre}`);
+    onSelect({
+      producto_id: c.producto_id, sku: c.sku, nombre: c.nombre,
+      presentaciones: c.presentaciones, presentacion_default: c.presentacion_default,
+      unidad_base: c.unidad_base,
+    }, texto);
+    setQ(c.nombre);   // solo el nombre, sin SKU
     setOpen(false);
     if (c.origen !== "exacto" && texto && texto.toLowerCase() !== c.nombre.toLowerCase()) {
       // El usuario confirmó el cruce → se aprende para no volver a preguntar.

@@ -119,7 +119,11 @@ def match_productos(
     for texto in payload.textos:
         cands = buscar(db, ctx.tenant_id, texto, limit=payload.limit)
         resultados.append({"texto": texto, "candidatos": [
-            CandidatoOut(producto_id=c.producto_id, sku=c.sku, nombre=c.nombre, score=c.score, origen=c.origen)
+            CandidatoOut(
+                producto_id=c.producto_id, sku=c.sku, nombre=c.nombre, score=c.score, origen=c.origen,
+                presentaciones=c.presentaciones, presentacion_default=c.presentacion_default,
+                unidad_base=c.unidad_base,
+            )
             for c in cands
         ]})
         if not cands:
@@ -133,7 +137,11 @@ def match_productos(
             pid = ia.get(r["texto"])
             if not r["candidatos"] and pid and pid in prods:
                 p = prods[pid]
-                r["candidatos"] = [CandidatoOut(producto_id=p.id, sku=p.sku, nombre=p.nombre, score=85, origen="ia")]
+                r["candidatos"] = [CandidatoOut(
+                    producto_id=p.id, sku=p.sku, nombre=p.nombre, score=85, origen="ia",
+                    presentaciones=p.presentaciones or {}, presentacion_default=p.presentacion_default,
+                    unidad_base=p.unidad_base,
+                )]
     return resultados
 
 

@@ -282,6 +282,9 @@ export type Candidato = {
   nombre: string;
   score: number;
   origen: "exacto" | "alias" | "difuso" | "ia";
+  presentaciones: Record<string, number>;
+  presentacion_default?: string | null;
+  unidad_base?: string | null;
 };
 export type MatchResult = { texto: string; candidatos: Candidato[] };
 
