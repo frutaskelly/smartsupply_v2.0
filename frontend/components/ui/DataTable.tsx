@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowDown, ArrowUp, ChevronsUpDown, Columns3, Download, Eye, EyeOff, GripVertical } from "lucide-react";
 
 import { EmptyState } from "./EmptyState";
+import { Select } from "./Field";
 import { Spinner } from "./Spinner";
 
 export type Column<T> = {
@@ -510,20 +511,22 @@ export function DataTable<T>({
   const footer =
     paginated && !loading && !error && rows.length > 0 ? (
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-sm text-muted">
-        <label className="flex items-center gap-2">
+        <div className="flex items-center gap-2">
           <span>Filas por página</span>
-          <select
-            value={pageSize}
-            onChange={(e) => setPageSize(Number(e.target.value))}
-            className="rounded-lg border border-border bg-background px-2 py-1 text-sm outline-none focus:border-accent"
-          >
-            {pageSizeOptions.map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </select>
-        </label>
+          <div className="w-20">
+            <Select
+              value={String(pageSize)}
+              onChange={(e) => setPageSize(Number(e.target.value))}
+              aria-label="Filas por página"
+            >
+              {pageSizeOptions.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </Select>
+          </div>
+        </div>
         <div className="flex items-center gap-3">
           <span className="tabular-nums">
             {from}–{to} de {filteredRows.length}
