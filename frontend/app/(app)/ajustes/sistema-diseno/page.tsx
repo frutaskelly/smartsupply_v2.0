@@ -13,6 +13,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { Field, Input, Select, Switch, Textarea } from "@/components/ui/Field";
 import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { SearchBox, SearchSelect, type SearchOption } from "@/components/ui/SearchBox";
 import { Spinner } from "@/components/ui/Spinner";
 import { Tabs } from "@/components/ui/Tabs";
 import { useToast } from "@/components/ui/Toast";
@@ -36,11 +37,24 @@ const DEMO_ROWS: Demo[] = [
   { id: 6, nombre: "Papel higiénico 4 rollos", estado: "Inactivo" },
 ];
 
+const UNIDADES_SAT: SearchOption[] = [
+  { value: "KGM", label: "Kilogramo", hint: "KGM" },
+  { value: "H87", label: "Pieza", hint: "H87" },
+  { value: "LTR", label: "Litro", hint: "LTR" },
+  { value: "XBX", label: "Caja", hint: "XBX" },
+  { value: "MTR", label: "Metro", hint: "MTR" },
+  { value: "GRM", label: "Gramo", hint: "GRM" },
+  { value: "XPK", label: "Paquete", hint: "XPK" },
+  { value: "E48", label: "Unidad de servicio", hint: "E48" },
+];
+
 export default function SistemaDisenoPage() {
   const toast = useToast();
   const [sw, setSw] = useState(true);
   const [modal, setModal] = useState(false);
   const [confirm, setConfirm] = useState(false);
+  const [busqueda, setBusqueda] = useState("");
+  const [unidadSat, setUnidadSat] = useState<string | null>("KGM");
 
   const cols: Column<Demo>[] = [
     { header: "ID", cell: (r) => r.id, className: "w-1", sortable: true, sortValue: (r) => r.id },
@@ -182,6 +196,40 @@ export default function SistemaDisenoPage() {
           <Button variant="danger" onClick={() => setConfirm(true)}>
             <Trash2 size={16} /> Abrir Confirm
           </Button>
+        </div>
+      </Card>
+
+      {/* Search box */}
+      <Card title="Search box" subtitle="SearchBox (sencillo) · SearchSelect (búsqueda + dropdown)">
+        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+          {/* 1) Sencillo */}
+          <div>
+            <h3 className="mb-1 text-sm font-semibold">1. Search box sencillo</h3>
+            <p className="mb-2 text-xs text-muted">
+              Ícono de lupa, botón para limpiar. Para filtrar listas o tablas en vivo.
+            </p>
+            <SearchBox value={busqueda} onChange={setBusqueda} placeholder="Buscar…" />
+            <p className="mt-2 text-xs text-muted">
+              Valor: <code className="rounded bg-surface-2 px-1">{busqueda || "—"}</code>
+            </p>
+          </div>
+
+          {/* 2) Búsqueda + dropdown */}
+          <div>
+            <h3 className="mb-1 text-sm font-semibold">2. Search box + dropdown</h3>
+            <p className="mb-2 text-xs text-muted">
+              Combobox: escribe para filtrar (sin acentos), navega con ↑/↓, Enter selecciona.
+            </p>
+            <SearchSelect
+              options={UNIDADES_SAT}
+              value={unidadSat}
+              onSelect={(o) => setUnidadSat(o?.value ?? null)}
+              placeholder="Buscar unidad SAT…"
+            />
+            <p className="mt-2 text-xs text-muted">
+              Selección: <code className="rounded bg-surface-2 px-1">{unidadSat ?? "—"}</code>
+            </p>
+          </div>
         </div>
       </Card>
 
