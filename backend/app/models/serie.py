@@ -25,6 +25,8 @@ class Serie(Base, TimestampMixin):
     nombre = Column(String(120))
     folio_actual = Column(Integer, nullable=False, server_default="0")
     activa = Column(Boolean, nullable=False, server_default="true")
+    # Serie predeterminada del inquilino para su tipo_documento (una sola, índice parcial).
+    es_default = Column(Boolean, nullable=False, server_default="false")
     vigencia_desde = Column(Date)
     vigencia_hasta = Column(Date)
     notas = Column(Text)

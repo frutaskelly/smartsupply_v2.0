@@ -13,7 +13,6 @@ from sqlalchemy import (
     Boolean,
     Column,
     Date,
-    DateTime,
     Enum,
     ForeignKey,
     Integer,
@@ -22,7 +21,6 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
 
 from ..core.db import Base
 from .base import SoftDeleteMixin, TimestampMixin, uuid_pk

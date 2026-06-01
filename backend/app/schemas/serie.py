@@ -17,6 +17,7 @@ class SerieBase(BaseModel):
     tipo_documento: TipoDoc
     nombre: Optional[str] = Field(default=None, max_length=120)
     activa: bool = True
+    es_default: bool = False
     vigencia_desde: Optional[date] = None
     vigencia_hasta: Optional[date] = None
     notas: Optional[str] = None
@@ -26,9 +27,20 @@ class SerieCreate(SerieBase):
     folio_actual: int = Field(default=0, ge=0)  # folio inicial; el primero emitido será +1
 
 
+class SeriePairCreate(BaseModel):
+    """Crea de un golpe la serie de factura (fiscal) y la de remisión (no fiscal)."""
+    codigo_factura: str = Field(max_length=25)      # p. ej. "SLP" → folios SLP1, SLP2…
+    codigo_remision: str = Field(max_length=25)     # p. ej. "RSLP" → folios RSLP1, RSLP2…
+    nombre: Optional[str] = Field(default=None, max_length=120)
+    es_default: bool = False
+    folio_inicial_factura: int = Field(default=0, ge=0)
+    folio_inicial_remision: int = Field(default=0, ge=0)
+
+
 class SerieUpdate(BaseModel):
     nombre: Optional[str] = Field(default=None, max_length=120)
     activa: Optional[bool] = None
+    es_default: Optional[bool] = None
     vigencia_desde: Optional[date] = None
     vigencia_hasta: Optional[date] = None
     notas: Optional[str] = None

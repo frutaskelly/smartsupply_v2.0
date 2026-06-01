@@ -16,8 +16,17 @@ from sqlalchemy.orm import Session
 
 from ...core.rbac import AuthContext, get_tenant_db, require_permission
 from ...models import CategoriaProducto, EsquemaImpuesto, Producto
-from ...schemas.producto import ProductoCreate, ProductoOut, ProductoUpdate
+from ...schemas.producto import (
+    AliasIn,
+    CandidatoOut,
+    MatchIn,
+    MatchResultOut,
+    ProductoCreate,
+    ProductoOut,
+    ProductoUpdate,
+)
 from ...schemas.common import Page
+from ...services.producto_match import aprender_alias, buscar, sugerir_con_ia
 from ._helpers import ensure_fk, flush_or_conflict, get_or_404, paginate
 
 router = APIRouter(prefix="/productos", tags=["productos"])
@@ -95,6 +104,57 @@ def productos_similares(
     )
     rows = query.order_by(Producto.nombre.asc()).limit(10).all()
     return [ProductoOut.model_validate(r) for r in rows]
+
+
+@router.post("/match", response_model=list[MatchResultOut])
+def match_productos(
+    payload: MatchIn,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """Cruza textos libres (tecleados/pegados) contra el catálogo: exacto → alias
+    aprendido → difuso, y opcionalmente IA para los que no resuelvan."""
+    resultados: list[dict] = []
+    sin_match: list[str] = []
+    for texto in payload.textos:
+        cands = buscar(db, ctx.tenant_id, texto, limit=payload.limit)
+        resultados.append({"texto": texto, "candidatos": [
+            CandidatoOut(
+                producto_id=c.producto_id, sku=c.sku, nombre=c.nombre, score=c.score, origen=c.origen,
+                presentaciones=c.presentaciones, presentacion_default=c.presentacion_default,
+                unidad_base=c.unidad_base,
+            )
+            for c in cands
+        ]})
+        if not cands:
+            sin_match.append(texto)
+
+    if payload.usar_ia and sin_match:
+        ia = sugerir_con_ia(db, ctx.tenant_id, sin_match)
+        pids = {pid for pid in ia.values() if pid}
+        prods = {p.id: p for p in db.query(Producto).filter(Producto.id.in_(pids)).all()} if pids else {}
+        for r in resultados:
+            pid = ia.get(r["texto"])
+            if not r["candidatos"] and pid and pid in prods:
+                p = prods[pid]
+                r["candidatos"] = [CandidatoOut(
+                    producto_id=p.id, sku=p.sku, nombre=p.nombre, score=85, origen="ia",
+                    presentaciones=p.presentaciones or {}, presentacion_default=p.presentacion_default,
+                    unidad_base=p.unidad_base,
+                )]
+    return resultados
+
+
+@router.post("/alias", status_code=status.HTTP_201_CREATED)
+def crear_alias(
+    payload: AliasIn,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """Aprende un alias confirmado por el usuario: el próximo cruce lo resuelve solo."""
+    ensure_fk(db, Producto, payload.producto_id, "producto_id")
+    aprender_alias(db, ctx.tenant_id, payload.texto, payload.producto_id, origen="MANUAL", user_id=ctx.user_id)
+    return {"ok": True}
 
 
 @router.post("", response_model=ProductoOut, status_code=status.HTTP_201_CREATED)

@@ -12,7 +12,7 @@ import { ApiError, apiFetch } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import { fmtMoney } from "@/lib/format";
 import { useMutation, useResource, type Page } from "@/lib/hooks";
-import type { Cliente, Cotizacion, ListaPrecios, PrecioOverride, Producto, Sucursal } from "@/lib/types";
+import type { Cliente, Cotizacion, ListaPrecios, PrecioOverride, Producto, Serie, Sucursal } from "@/lib/types";
 
 const WRITE_SUC = "cliente:gestionar";
 const WRITE_OVR = "lista_precios:gestionar";
@@ -35,9 +35,13 @@ export default function SucursalesPage() {
   const clientesRes = useResource<Page<Cliente>>("/api/v1/clientes?limit=200");
   const productosRes = useResource<Page<Producto>>("/api/v1/productos?limit=200");
   const listasRes = useResource<Page<ListaPrecios>>("/api/v1/listas-precios?limit=200");
+  const seriesFacRes = useResource<Page<Serie>>("/api/v1/series?tipo_documento=FACTURA&activa=true&limit=200");
+  const seriesRemRes = useResource<Page<Serie>>("/api/v1/series?tipo_documento=REMISION&activa=true&limit=200");
   const clientes = clientesRes.data?.items ?? [];
   const productos = productosRes.data?.items ?? [];
   const listas = listasRes.data?.items ?? [];
+  const seriesFac = seriesFacRes.data?.items ?? [];
+  const seriesRem = seriesRemRes.data?.items ?? [];
   const prodName = useMemo(() => Object.fromEntries(productos.map((p) => [p.id, p.nombre])), [productos]);
   const listaName = useMemo(() => Object.fromEntries(listas.map((l) => [l.id, l.nombre])), [listas]);
   const prodById = useMemo(() => Object.fromEntries(productos.map((p) => [p.id, p])), [productos]);
@@ -61,7 +65,7 @@ export default function SucursalesPage() {
   const [overrides, setOverrides] = useState<PrecioOverride[]>([]);
   const [scope, setScope] = useState("cliente"); // "cliente" | <sucursalId>
 
-  const [nuevaSuc, setNuevaSuc] = useState({ nombre: "", lista_precios_id: "" });
+  const [nuevaSuc, setNuevaSuc] = useState({ nombre: "", lista_precios_id: "", serie_factura_id: "", serie_remision_id: "" });
   const [nuevoOvr, setNuevoOvr] = useState({ producto_id: "", presentacion: "KILO", precio_unitario: "" });
 
   const sucName = useMemo(() => Object.fromEntries(sucursales.map((s) => [s.id, s.nombre])), [sucursales]);
@@ -103,9 +107,11 @@ export default function SucursalesPage() {
         cliente_id: clienteId, nombre: nuevaSuc.nombre.trim(),
         // El código se autogenera en el backend (SUC-01, SUC-02, …).
         lista_precios_id: nuevaSuc.lista_precios_id || null,
+        serie_factura_id: nuevaSuc.serie_factura_id || null,
+        serie_remision_id: nuevaSuc.serie_remision_id || null,
       });
       toast.success("Sucursal creada");
-      setNuevaSuc({ nombre: "", lista_precios_id: "" });
+      setNuevaSuc({ nombre: "", lista_precios_id: "", serie_factura_id: "", serie_remision_id: "" });
       loadSucursales(clienteId);
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo crear");
@@ -219,6 +225,20 @@ export default function SucursalesPage() {
                     onChange={(e) => setNuevaSuc({ ...nuevaSuc, nombre: e.target.value })}
                   />
                 </Field>
+                <div className="grid grid-cols-2 gap-2">
+                  <Field label="Serie de factura">
+                    <Select value={nuevaSuc.serie_factura_id} onChange={(e) => setNuevaSuc({ ...nuevaSuc, serie_factura_id: e.target.value })}>
+                      <option value="">(usa la del cliente / default)</option>
+                      {seriesFac.map((s) => <option key={s.id} value={s.id}>{s.codigo}{s.nombre ? ` · ${s.nombre}` : ""}</option>)}
+                    </Select>
+                  </Field>
+                  <Field label="Serie de remisión">
+                    <Select value={nuevaSuc.serie_remision_id} onChange={(e) => setNuevaSuc({ ...nuevaSuc, serie_remision_id: e.target.value })}>
+                      <option value="">(usa la del cliente / default)</option>
+                      {seriesRem.map((s) => <option key={s.id} value={s.id}>{s.codigo}{s.nombre ? ` · ${s.nombre}` : ""}</option>)}
+                    </Select>
+                  </Field>
+                </div>
                 <div className="flex items-end gap-2">
                   <div className="flex-1">
                     <Field label="Lista propia">
@@ -230,7 +250,7 @@ export default function SucursalesPage() {
                   </div>
                   <Button onClick={addSucursal}><Plus size={16} /> Agregar</Button>
                 </div>
-                <p className="text-xs text-muted">El código se genera automáticamente (SUC-01, SUC-02, …).</p>
+                <p className="text-xs text-muted">El código se genera automáticamente (SUC-01, SUC-02, …). La serie de la sucursal gana sobre la del cliente.</p>
               </div>
             )}
             <DataTable columns={sucCols} rows={sucursales} empty="Sin sucursales (las ventas usan el precio del cliente)" />

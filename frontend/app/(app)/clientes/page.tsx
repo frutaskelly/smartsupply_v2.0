@@ -47,12 +47,34 @@ const config: CrudConfig<Cliente> = {
         { value: "BAJA", label: "Baja" },
       ],
     },
+    {
+      name: "serie_factura_id",
+      label: "Serie de factura",
+      type: "select",
+      hint: "La sucursal puede sobreescribirla; en blanco usa la predeterminada",
+    },
+    {
+      name: "serie_remision_id",
+      label: "Serie de remisión",
+      type: "select",
+      hint: "La sucursal puede sobreescribirla; en blanco usa la predeterminada",
+    },
   ],
   lookups: {
     lista_precios_id: {
       path: "/api/v1/listas-precios?limit=200",
       value: (r) => String(r.id),
       label: (r) => String(r.nombre),
+    },
+    serie_factura_id: {
+      path: "/api/v1/series?tipo_documento=FACTURA&activa=true&limit=200",
+      value: (r) => String(r.id),
+      label: (r) => `${r.codigo}${r.nombre ? ` · ${r.nombre}` : ""}`,
+    },
+    serie_remision_id: {
+      path: "/api/v1/series?tipo_documento=REMISION&activa=true&limit=200",
+      value: (r) => String(r.id),
+      label: (r) => `${r.codigo}${r.nombre ? ` · ${r.nombre}` : ""}`,
     },
   },
   newValues: () => ({
@@ -66,6 +88,8 @@ const config: CrudConfig<Cliente> = {
     limite_credito: "0",
     dias_credito: "0",
     status: "ACTIVO",
+    serie_factura_id: "",
+    serie_remision_id: "",
   }),
   toForm: (c) => ({
     codigo: c.codigo ?? "",
@@ -78,6 +102,8 @@ const config: CrudConfig<Cliente> = {
     limite_credito: c.limite_credito,
     dias_credito: String(c.dias_credito),
     status: c.status,
+    serie_factura_id: c.serie_factura_id ?? "",
+    serie_remision_id: c.serie_remision_id ?? "",
   }),
   toPayload: (v) => ({
     codigo: (v.codigo as string) || null,
@@ -90,6 +116,8 @@ const config: CrudConfig<Cliente> = {
     limite_credito: Number(v.limite_credito) || 0,
     dias_credito: Number(v.dias_credito) || 0,
     status: v.status,
+    serie_factura_id: (v.serie_factura_id as string) || null,
+    serie_remision_id: (v.serie_remision_id as string) || null,
   }),
   rowLabel: (c) => c.legal_name,
 };

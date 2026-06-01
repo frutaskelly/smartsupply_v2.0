@@ -65,6 +65,11 @@ class Factura(Base, TimestampMixin, SoftDeleteMixin):
     xml = Column(Text)
     pdf_url = Column(Text)
 
+    # ── cancelación CFDI ──
+    fecha_cancelacion = Column(DateTime(timezone=True))
+    motivo_cancelacion = Column(String(2))      # 01-04 (CFDI 4.0)
+    uuid_sustitucion = Column(String(36))
+
     notas = Column(Text)
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
 

@@ -4,9 +4,9 @@ Tenant-scoped. Holds the fiscal identity used to stamp CFDIs (RFC, régimen,
 uso CFDI, formas/métodos de pago, domicilio fiscal) plus commercial terms
 (price list, credit) and running accumulators.
 
-Deferred to Phase 6 (Fiscal): `serie_fiscal_id` / `serie_remision_id` — they
-FK to `series_fiscales`, which does not exist yet. They'll be added by a later
-migration once that table lands.
+Series predeterminadas (`serie_factura_id` / `serie_remision_id`) FK a `series`;
+fijan la serie del cliente al emitir, salvo que la sucursal o una elección manual
+las sobreescriban (ver services/series.py:resolver_serie).
 """
 from sqlalchemy import (
     Column,
@@ -67,5 +67,13 @@ class Cliente(Base, TimestampMixin, SoftDeleteMixin):
     ultimo_pago_at = Column(DateTime(timezone=True))
 
     custom_fields = Column(JSONB, nullable=False, server_default="{}")
+
+    # ── series de folios predeterminadas del cliente (la sucursal gana sobre esto) ──
+    serie_factura_id = Column(
+        UUID(as_uuid=True), ForeignKey("series.id", ondelete="SET NULL"), nullable=True
+    )
+    serie_remision_id = Column(
+        UUID(as_uuid=True), ForeignKey("series.id", ondelete="SET NULL"), nullable=True
+    )
 
     lista_precios = relationship("ListaPrecios")

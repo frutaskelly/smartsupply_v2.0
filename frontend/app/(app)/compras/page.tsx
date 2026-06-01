@@ -167,17 +167,19 @@ export default function ComprasPage() {
   }
 
   const cols: Column<OrdenCompra>[] = [
-    { header: "Folio", cell: (o) => <span className="font-medium">{o.folio ?? "—"}</span> },
-    { header: "Proveedor", cell: (o) => provName[o.proveedor_id] ?? "—" },
-    { header: "Fecha", cell: (o) => fmtDate(o.fecha) },
+    { header: "Folio", cell: (o) => <span className="font-medium">{o.folio ?? "—"}</span>, sortable: true, sortValue: (o) => o.folio ?? "" },
+    { header: "Proveedor", cell: (o) => provName[o.proveedor_id] ?? "—", sortable: true, sortValue: (o) => provName[o.proveedor_id] ?? "" },
+    { header: "Fecha", cell: (o) => fmtDate(o.fecha), sortable: true, sortValue: (o) => o.fecha },
     {
       header: "Estado",
       cell: (o) => {
         const e = ESTADO[o.estado] ?? { label: o.estado, tone: "muted" as Tone };
         return <Badge tone={e.tone}>{e.label}</Badge>;
       },
+      sortable: true,
+      sortValue: (o) => ESTADO[o.estado]?.label ?? o.estado,
     },
-    { header: "Total", cell: (o) => fmtMoney(o.total_estimado), className: "text-right" },
+    { header: "Total", cell: (o) => fmtMoney(o.total_estimado), className: "text-right", sortable: true, sortValue: (o) => Number(o.total_estimado) },
     {
       header: "", className: "text-right w-1",
       cell: (o) => (
@@ -205,7 +207,7 @@ export default function ComprasPage() {
         </Select>
       </div>
 
-      <DataTable columns={cols} rows={ordenes} loading={loading} error={error} empty="Sin órdenes de compra" onRowClick={(o) => openDetail(o.id)} />
+      <DataTable columns={cols} rows={ordenes} loading={loading} error={error} empty="Sin órdenes de compra" onRowClick={(o) => openDetail(o.id)} columnsMenu resizable exportable exportFilename="ordenes-compra" storageKey="compras-oc" />
 
       {/* ── Alta ── */}
       <Modal

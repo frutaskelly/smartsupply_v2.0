@@ -80,3 +80,31 @@ class ProductoOut(ORMModel, ProductoBase):
     tenant_id: uuid.UUID
     created_at: datetime
     updated_at: datetime
+
+
+# ─── Cruce de productos (match / alias aprendidos) ───────────────────────────
+class MatchIn(BaseModel):
+    textos: list[str] = Field(min_length=1, max_length=200)
+    usar_ia: bool = False         # complementa con IA los textos sin buen candidato
+    limit: int = Field(default=5, ge=1, le=20)
+
+
+class CandidatoOut(BaseModel):
+    producto_id: uuid.UUID
+    sku: str
+    nombre: str
+    score: int
+    origen: str                   # exacto | alias | difuso | ia
+    presentaciones: dict = {}
+    presentacion_default: Optional[str] = None
+    unidad_base: Optional[str] = None
+
+
+class MatchResultOut(BaseModel):
+    texto: str
+    candidatos: list[CandidatoOut]
+
+
+class AliasIn(BaseModel):
+    texto: str = Field(min_length=1, max_length=254)
+    producto_id: uuid.UUID

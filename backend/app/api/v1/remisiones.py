@@ -31,7 +31,7 @@ from ...models import (
     Sucursal,
 )
 from ...services.precios import resolver_precio
-from ...services.series import siguiente_folio
+from ...services.series import consumir_folio, resolver_serie, siguiente_folio
 from ...schemas.common import Page
 from ...schemas.remision import (
     ConfirmarRemisionIn,
@@ -51,20 +51,28 @@ _ZERO = Decimal("0")
 _DUP = "Folio de remisión duplicado"
 
 
-def _next_folio(db: Session, tenant_id) -> str:
-    """Folio R-N de la serie no fiscal 'R' (contador sin huecos); si no existe la
-    serie, cae a max+1 sobre los folios R- existentes (back-compat)."""
+def _next_folio(db: Session, tenant_id, *, sucursal_id=None, cliente_id=None, serie_id=None) -> str:
+    """Folio `{codigo}{N}` (serie y número juntos, sin guion) de la serie de remisión
+    resuelta (override → sucursal → cliente → default), contador sin huecos. Si no hay
+    serie aplicable, cae a la serie 'R' por código y, en último caso, a max+1 (back-compat)."""
+    serie = resolver_serie(
+        db, tenant_id, "REMISION", serie_id=serie_id, sucursal_id=sucursal_id, cliente_id=cliente_id
+    )
+    if serie is not None:
+        folio = consumir_folio(db, serie.id)
+        if folio is not None:
+            return f"{serie.codigo}{folio}"
     folio = siguiente_folio(db, tenant_id, codigo="R", tipo_documento="REMISION")
     if folio is not None:
-        return f"R-{folio}"
+        return f"R{folio}"
     mx = 0
     for (f,) in db.query(Remision.folio_interno).filter(Remision.folio_interno.isnot(None)).all():
-        if f and f.startswith("R-"):
-            try:
-                mx = max(mx, int(f[2:]))
-            except ValueError:
-                pass
-    return f"R-{mx + 1}"
+        if not f or not f.startswith("R"):
+            continue
+        num = f[1:].lstrip("-")  # tolera "R5" y "R-5" (legado)
+        if num.isdigit():
+            mx = max(mx, int(num))
+    return f"R{mx + 1}"
 
 
 @router.get("", response_model=Page[RemisionOut])
@@ -109,7 +117,12 @@ def create_remision(
 
     rem = Remision(
         tenant_id=ctx.tenant_id,
-        folio_interno=_next_folio(db, ctx.tenant_id),
+        folio_interno=_next_folio(
+            db, ctx.tenant_id,
+            sucursal_id=payload.sucursal_id,
+            cliente_id=payload.cliente_facturacion_id,
+            serie_id=payload.serie_id,
+        ),
         cliente_facturacion_id=payload.cliente_facturacion_id,
         almacen_id=payload.almacen_id,
         sucursal_id=payload.sucursal_id,

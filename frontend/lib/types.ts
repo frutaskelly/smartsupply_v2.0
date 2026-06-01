@@ -100,6 +100,28 @@ export type Sucursal = {
   contacto?: string | null;
   telefono?: string | null;
   activo: boolean;
+  serie_factura_id?: string | null;
+  serie_remision_id?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TipoSerie = "FISCAL" | "NO_FISCAL";
+export type TipoDocSerie = "FACTURA" | "NOTA_CREDITO" | "REMISION" | "PAGO";
+
+export type Serie = {
+  id: string;
+  tenant_id: string;
+  codigo: string;
+  tipo: TipoSerie;
+  tipo_documento: TipoDocSerie;
+  nombre?: string | null;
+  folio_actual: number;
+  activa: boolean;
+  es_default: boolean;
+  vigencia_desde?: string | null;
+  vigencia_hasta?: string | null;
+  notas?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -146,6 +168,8 @@ export type Cliente = {
   dias_credito: number;
   descuento_default: string;
   config_addenda: Record<string, unknown>;
+  serie_factura_id?: string | null;
+  serie_remision_id?: string | null;
   saldo_actual: string;
   ventas_ytd: string;
   ultima_venta_at?: string | null;
@@ -167,21 +191,103 @@ export type ExistenciaRow = {
   valor: string;
 };
 
-export type Movimiento = {
+export type LineaRemision = {
+  id: string;
+  numero_linea: number;
+  producto_id: string;
+  presentacion: string;
+  cantidad_solicitada: string;
+  cantidad_surtida?: string | null;
+  precio_unitario: string;
+  importe: string;
+  lote_id?: string | null;
+  notas?: string | null;
+};
+
+export type Remision = {
   id: string;
   tenant_id: string;
-  tipo: string;
-  fecha: string;
-  lote_id: string;
-  cantidad: string;
-  costo_unitario?: string | null;
-  ref_tipo?: string | null;
-  ref_id?: string | null;
-  motivo?: string | null;
+  folio_interno: string;
+  cliente_facturacion_id: string;
+  almacen_id?: string | null;
+  sucursal_id?: string | null;
+  lista_precios_id?: string | null;
+  fecha_remision: string;
+  fecha_entrega?: string | null;
+  estado: "BORRADOR" | "CONFIRMADA" | "CANCELADA";
+  canal: string;
+  factura_id?: string | null;
+  subtotal: string;
+  descuento: string;
+  iva: string;
+  ieps: string;
+  total: string;
   notas?: string | null;
-  created_by?: string | null;
+  nota_entrega?: string | null;
   created_at: string;
+  updated_at: string;
 };
+
+export type RemisionDetail = Remision & { lineas: LineaRemision[] };
+
+export type LineaFactura = {
+  numero_linea: number;
+  producto_id: string;
+  clave_prod_serv: string;
+  clave_unidad: string;
+  descripcion: string;
+  cantidad: string;
+  valor_unitario: string;
+  importe: string;
+  descuento: string;
+  objeto_imp: string;
+  iva_tasa: string;
+  iva_importe: string;
+  ieps_importe: string;
+  ret_iva_importe: string;
+  ret_isr_importe: string;
+};
+
+export type Factura = {
+  id: string;
+  tenant_id: string;
+  serie: string;
+  folio: number;
+  cliente_id: string;
+  uso_cfdi: string;
+  forma_pago: string;
+  metodo_pago: string;
+  moneda: string;
+  tipo_comprobante: string;
+  fecha: string;
+  subtotal: string;
+  iva_trasladado: string;
+  total: string;
+  estado: "BORRADOR" | "TIMBRADA" | "CANCELADA";
+  uuid?: string | null;
+  fecha_timbrado?: string | null;
+  fecha_cancelacion?: string | null;
+  motivo_cancelacion?: string | null;
+  notas?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type FacturaDetail = Factura & { lineas: LineaFactura[] };
+
+// Cruce de productos (match)
+export type Candidato = {
+  producto_id: string;
+  sku: string;
+  nombre: string;
+  score: number;
+  origen: "exacto" | "alias" | "difuso" | "ia";
+  presentaciones: Record<string, number>;
+  presentacion_default?: string | null;
+  unidad_base?: string | null;
+};
+export type MatchResult = { texto: string; candidatos: Candidato[] };
+
 
 export type Proveedor = {
   id: string;

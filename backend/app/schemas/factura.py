@@ -11,11 +11,20 @@ from .common import ORMModel
 
 class FacturaDesdeRemisionesIn(BaseModel):
     remision_ids: List[uuid.UUID] = Field(min_length=1)
-    serie: str = Field(default="A", max_length=10)
+    # Override manual de serie al emitir; si es None se resuelve por sucursal/cliente/default.
+    serie_id: Optional[uuid.UUID] = None
+    serie: Optional[str] = Field(default=None, max_length=10)  # back-compat por código
     uso_cfdi: Optional[str] = Field(default=None, max_length=5)
     forma_pago: Optional[str] = Field(default=None, max_length=5)
     metodo_pago: Optional[str] = Field(default=None, max_length=5)
     notas: Optional[str] = None
+
+
+class CancelarFacturaIn(BaseModel):
+    # 01 errores con relación (requiere uuid_sustitucion) | 02 sin relación |
+    # 03 no se llevó a cabo | 04 operación nominativa en factura global
+    motivo: str = Field(default="02", pattern="^0[1-4]$")
+    uuid_sustitucion: Optional[uuid.UUID] = None
 
 
 class LineaFacturaOut(ORMModel):
@@ -61,6 +70,8 @@ class FacturaOut(ORMModel):
     estado: str
     uuid: Optional[str] = None
     fecha_timbrado: Optional[datetime] = None
+    fecha_cancelacion: Optional[datetime] = None
+    motivo_cancelacion: Optional[str] = None
     pdf_url: Optional[str] = None
     notas: Optional[str] = None
     created_at: datetime
