@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
@@ -88,8 +88,17 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
   const total = data?.total ?? 0;
 
   const [lookupOpts, setLookupOpts] = useState<Record<string, { value: string; label: string }[]>>({});
+  const lookupsLoaded = useRef(false);
+
+  const [form, setForm] = useState<FormValues | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [toDelete, setToDelete] = useState<T | null>(null);
+
+  // Lookups de los selects del formulario: se cargan la primera vez que se abre
+  // el formulario, no al montar la página (ahorra peticiones en la carga inicial).
   useEffect(() => {
-    if (!config.lookups) return;
+    if (!config.lookups || form === null || lookupsLoaded.current) return;
+    lookupsLoaded.current = true;
     let active = true;
     (async () => {
       const out: Record<string, { value: string; label: string }[]> = {};
@@ -106,11 +115,7 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
     return () => {
       active = false;
     };
-  }, [config.lookups]);
-
-  const [form, setForm] = useState<FormValues | null>(null);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [toDelete, setToDelete] = useState<T | null>(null);
+  }, [config.lookups, form]);
 
   function openCreate() {
     setEditingId(null);

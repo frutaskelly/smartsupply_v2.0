@@ -61,7 +61,7 @@ export default function RemisionesPage() {
   const { post, loading: saving } = useMutation();
 
   // catálogos
-  const clientesRes = useResource<Page<Cliente>>("/api/v1/clientes?limit=500");
+  const clientesRes = useResource<Page<Cliente>>("/api/v1/clientes?limit=200");
   const almacenesRes = useResource<Page<Almacen>>("/api/v1/almacenes?limit=200");
   const productosRes = useResource<Page<Producto>>("/api/v1/productos?limit=1000");
   const clientes = clientesRes.data?.items ?? [];

@@ -39,6 +39,22 @@ def set_tenant(db: Session, tenant_id: UUID | str) -> None:
     )
 
 
+def set_role_tenant(db: Session, tenant_id: UUID | str) -> None:
+    """Baja a `app_user` y fija el tenant en UN solo viaje a la base.
+
+    `set_config('role', 'app_user', true)` equivale a `SET LOCAL ROLE app_user`
+    (ambos fijan el GUC `role` dentro de la transacción); combinarlo con el GUC
+    del tenant en un solo SELECT ahorra una ida y vuelta por request — relevante
+    cuando la base está en la nube."""
+    db.execute(
+        text(
+            "SELECT set_config('role', 'app_user', true), "
+            "set_config('app.current_tenant_id', :tid, true)"
+        ),
+        {"tid": str(tenant_id)},
+    )
+
+
 def clear_tenant(db: Session) -> None:
     db.execute(text("SELECT set_config('app.current_tenant_id', '', true)"))
 

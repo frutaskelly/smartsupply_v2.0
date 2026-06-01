@@ -23,17 +23,18 @@ permission rows in the catalog. There is no SUPER_ADMIN / cross-tenant role.
 from __future__ import annotations
 
 import logging
+import os
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Iterator, Optional
 from uuid import UUID
 
 from fastapi import Depends, Header, HTTPException, status
-from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .auth import Principal, get_principal
-from .db import SessionLocal, set_tenant
+from .db import SessionLocal, set_role_tenant
 from ..models import Membership, Permission, Role, RolePermission, Tenant, User
 
 logger = logging.getLogger(__name__)
@@ -174,6 +175,18 @@ def _membership_views(db: Session, memberships: list[Membership]) -> list[Tenant
     return views
 
 
+# Caché de contexto de auth por (usuario, tenant seleccionado). Evita ~5 consultas
+# por request a la base (costoso cuando la DB está en la nube). TTL corto: un cambio
+# de rol/permiso se refleja en ≤ _AUTH_TTL segundos.
+_AUTH_TTL = float(os.environ.get("AUTH_CACHE_TTL", "30"))  # 0 desactiva (tests)
+_AUTH_CACHE: dict[tuple[str, str], tuple[float, "AuthContext"]] = {}
+
+
+def invalidate_auth_cache() -> None:
+    """Limpia el caché (úsalo tras cambios de roles/membresías si se requiere efecto inmediato)."""
+    _AUTH_CACHE.clear()
+
+
 def get_auth_context(
     principal: Principal = Depends(get_principal),
     x_tenant_id: Optional[str] = Header(default=None, alias="X-Tenant-Id"),
@@ -183,8 +196,16 @@ def get_auth_context(
     Runs on a privileged (RLS-bypassing) session because it must read the
     user's memberships across tenants *before* a tenant is chosen. This is the
     trusted server-side resolution step — it never keys off a client header
-    except to *select among* memberships that already exist.
+    except to *select among* memberships that already exist. Cacheado por token
+    durante `_AUTH_TTL` segundos para no repetir las consultas en cada request.
     """
+    key = (principal.auth_user_id, x_tenant_id or "")
+    now = time.monotonic()
+    if _AUTH_TTL > 0:
+        cached = _AUTH_CACHE.get(key)
+        if cached is not None and cached[0] > now:
+            return cached[1]
+
     db = SessionLocal()
     try:
         user = _resolve_user(db, principal)
@@ -199,7 +220,7 @@ def get_auth_context(
         perms = _effective_permissions(db, chosen.role_id, is_owner)
         views = _membership_views(db, memberships)
 
-        return AuthContext(
+        ctx = AuthContext(
             user_id=user.id,
             auth_user_id=principal.auth_user_id,
             email=user.email,
@@ -212,6 +233,13 @@ def get_auth_context(
         )
     finally:
         db.close()
+
+    if _AUTH_TTL > 0:
+        _AUTH_CACHE[key] = (now + _AUTH_TTL, ctx)
+        if len(_AUTH_CACHE) > 512:  # poda simple de expirados
+            for k in [k for k, (exp, _) in _AUTH_CACHE.items() if exp <= now]:
+                _AUTH_CACHE.pop(k, None)
+    return ctx
 
 
 def require_permission(*needed: str):
@@ -248,8 +276,7 @@ def get_tenant_db(ctx: AuthContext = Depends(get_auth_context)) -> Iterator[Sess
     """
     db = SessionLocal()
     try:
-        db.execute(text("SET LOCAL ROLE app_user"))
-        set_tenant(db, ctx.tenant_id)
+        set_role_tenant(db, ctx.tenant_id)
         yield db
         db.commit()
     except Exception:
@@ -264,8 +291,7 @@ def tenant_session(tenant_id: UUID | str) -> Iterator[Session]:
     """Same RLS scoping as `get_tenant_db`, for scripts / background tasks."""
     db = SessionLocal()
     try:
-        db.execute(text("SET LOCAL ROLE app_user"))
-        set_tenant(db, tenant_id)
+        set_role_tenant(db, tenant_id)
         yield db
         db.commit()
     except Exception:

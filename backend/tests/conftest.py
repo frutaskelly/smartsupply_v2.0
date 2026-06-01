@@ -9,6 +9,7 @@ import os
 os.environ.setdefault(
     "DATABASE_URL", "postgresql+psycopg2://postgres:postgres@localhost:5432/test"
 )
+os.environ.setdefault("AUTH_CACHE_TTL", "0")  # sin caché de auth en tests (determinismo)
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault(
     "SUPABASE_JWKS_URL",
