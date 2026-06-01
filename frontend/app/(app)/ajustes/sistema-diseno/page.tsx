@@ -191,9 +191,9 @@ export default function SistemaDisenoPage() {
           <b>Buscar</b> filtra en todas las columnas (sin acentos, por palabras). Clic en el encabezado para
           ordenar (asc → desc → sin orden). Botón <b>Columnas</b> para mostrar/ocultar y reordenar arrastrando.
           Arrastra el <b>borde derecho</b> de un encabezado para el ancho. Botón <b>Excel</b> para descargar.
-          Todo se recuerda por tabla.
+          Pie de tabla con <b>paginado</b> y selector de <b>filas por página</b>. Todo se recuerda por tabla.
         </p>
-        <DataTable columns={cols} rows={DEMO_ROWS} empty="Sin datos" searchable searchPlaceholder="Buscar producto…" columnsMenu resizable exportable exportFilename="demo" storageKey="demo-sistema-diseno" />
+        <DataTable columns={cols} rows={DEMO_ROWS} empty="Sin datos" searchable searchPlaceholder="Buscar producto…" columnsMenu resizable exportable exportFilename="demo" storageKey="demo-sistema-diseno" paginated defaultPageSize={5} pageSizeOptions={[5, 10, 25, 50]} />
       </Card>
 
       <Modal

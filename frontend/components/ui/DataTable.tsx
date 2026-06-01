@@ -87,6 +87,9 @@ export function DataTable<T>({
   storageKey,
   searchable,
   searchPlaceholder,
+  paginated,
+  pageSizeOptions = [10, 25, 50, 100],
+  defaultPageSize = 25,
 }: {
   columns: Column<T>[];
   rows: T[];
@@ -109,6 +112,10 @@ export function DataTable<T>({
    *  normalizado (sin acentos/mayúsculas) y por tokens (cada palabra debe aparecer). */
   searchable?: boolean;
   searchPlaceholder?: string;
+  /** Pagina del lado del cliente (sobre lo filtrado) con selector de filas/página. */
+  paginated?: boolean;
+  pageSizeOptions?: number[];
+  defaultPageSize?: number;
 }) {
   // ── identidad estable de cada columna ──
   const cols = useMemo(() => {
@@ -129,6 +136,8 @@ export function DataTable<T>({
   // ── estado de orden de filas (por id de columna) ──
   const [sort, setSort] = useState<SortState | null>(null);
   const [search, setSearch] = useState("");
+  const [pageSize, setPageSize] = useState(defaultPageSize);
+  const [pageIndex, setPageIndex] = useState(0);
 
   // ── estado del menú de columnas ──
   const [order, setOrder] = useState<string[]>([]); // orden explícito de columnas manejables
@@ -211,6 +220,17 @@ export function DataTable<T>({
       return tokens.every((t) => text.includes(t));
     });
   }, [sortedRows, search, cols]);
+
+  // ── paginación (cliente, sobre lo filtrado) ──
+  const pageCount = paginated ? Math.max(1, Math.ceil(filteredRows.length / pageSize)) : 1;
+  const safePage = Math.min(pageIndex, pageCount - 1);
+  const pagedRows = paginated
+    ? filteredRows.slice(safePage * pageSize, safePage * pageSize + pageSize)
+    : filteredRows;
+  // volver a la primera página cuando cambia la búsqueda o el tamaño de página
+  useEffect(() => {
+    setPageIndex(0);
+  }, [search, pageSize]);
 
   function toggleSort(id: string) {
     setSort((s) => {
@@ -431,7 +451,7 @@ export function DataTable<T>({
                 </td>
               </tr>
             ) : (
-              filteredRows.map((row, ri) => (
+              pagedRows.map((row, ri) => (
                 <tr
                   key={ri}
                   onClick={() => onRowClick?.(row)}
@@ -451,10 +471,56 @@ export function DataTable<T>({
     );
   }
 
+  const from = filteredRows.length === 0 ? 0 : safePage * pageSize + 1;
+  const to = Math.min((safePage + 1) * pageSize, filteredRows.length);
+  const footer =
+    paginated && !loading && !error && rows.length > 0 ? (
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-sm text-muted">
+        <label className="flex items-center gap-2">
+          <span>Filas por página</span>
+          <select
+            value={pageSize}
+            onChange={(e) => setPageSize(Number(e.target.value))}
+            className="rounded-lg border border-border bg-background px-2 py-1 text-sm outline-none focus:border-accent"
+          >
+            {pageSizeOptions.map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="flex items-center gap-3">
+          <span className="tabular-nums">
+            {from}–{to} de {filteredRows.length}
+          </span>
+          <div className="flex gap-1">
+            <button
+              type="button"
+              disabled={safePage <= 0}
+              onClick={() => setPageIndex(safePage - 1)}
+              className="rounded-lg border border-border bg-background px-2.5 py-1 hover:bg-surface-2 disabled:opacity-40"
+            >
+              Anterior
+            </button>
+            <button
+              type="button"
+              disabled={safePage >= pageCount - 1}
+              onClick={() => setPageIndex(safePage + 1)}
+              className="rounded-lg border border-border bg-background px-2.5 py-1 hover:bg-surface-2 disabled:opacity-40"
+            >
+              Siguiente
+            </button>
+          </div>
+        </div>
+      </div>
+    ) : null;
+
   return (
     <div>
       {toolbar}
       {body}
+      {footer}
     </div>
   );
 }
