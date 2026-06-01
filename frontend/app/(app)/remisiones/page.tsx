@@ -291,6 +291,7 @@ export default function RemisionesPage() {
   }
 
   async function guardar() {
+    if (saving) return; // evita doble envío (doble clic / doble disparo)
     if (!clienteId) { toast.error("Elige un cliente"); return; }
     const lns = lineas.filter((l) => l.producto_id && Number(l.cantidad) > 0);
     if (lns.length === 0) { toast.error("Agrega al menos una línea con producto y cantidad"); return; }
@@ -309,10 +310,9 @@ export default function RemisionesPage() {
       })),
     };
     try {
-      const rem = await apiFetch<RemisionDetail>("/api/v1/remisiones", {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
+      // `post` (useMutation) activa `saving`, que deshabilita el botón mientras
+      // se crea — así un segundo clic/disparo no genera una remisión duplicada.
+      const rem = await post<RemisionDetail>("/api/v1/remisiones", payload);
       toast.success(`Remisión ${rem.folio_interno} creada`);
       setMode("list");
       reload();
