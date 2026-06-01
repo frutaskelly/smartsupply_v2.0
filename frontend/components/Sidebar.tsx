@@ -120,11 +120,16 @@ function NavRow({
         aria-pressed={favorite}
         aria-label={favorite ? `Quitar ${item.label} de favoritos` : `Agregar ${item.label} a favoritos`}
         title={favorite ? "Quitar de favoritos" : "Agregar a favoritos"}
-        className={`absolute right-1 grid h-7 w-7 place-items-center rounded-md text-muted transition hover:bg-surface-2 hover:text-foreground ${
-          favorite ? "opacity-100" : "opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
-        }`}
+        className="absolute right-1 grid h-7 w-7 place-items-center rounded-md transition hover:bg-surface-2"
       >
-        <Star size={15} className={favorite ? "fill-current text-amber-500" : ""} />
+        <Star
+          size={15}
+          className={
+            favorite
+              ? "fill-amber-500 text-amber-500"
+              : "text-muted opacity-50 transition group-hover:opacity-100 hover:text-foreground"
+          }
+        />
       </button>
     </div>
   );
