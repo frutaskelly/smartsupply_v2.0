@@ -16,6 +16,7 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -29,7 +30,9 @@ from ...models import (
     Producto,
     Remision,
     Sucursal,
+    Tenant,
 )
+from ...services import email as email_service
 from ...services.precios import resolver_precio
 from ...services.series import consumir_folio, resolver_serie, siguiente_folio
 from ...schemas.common import Page
@@ -307,6 +310,91 @@ def cancelar_remision(
     db.flush()
     db.refresh(rem)
     return rem
+
+
+class EnviarRemisionIn(BaseModel):
+    to: Optional[str] = None
+
+
+def _fmt_money(value: Decimal) -> str:
+    return f"${value:,.2f}"
+
+
+def _build_remision_html(rem: Remision, cliente_nombre: str, lineas: list) -> str:
+    filas = []
+    total = _ZERO
+    for ln in lineas:
+        importe = ln.importe or _ZERO
+        total += importe
+        filas.append(
+            "<tr>"
+            f"<td style='padding:6px 10px;border-bottom:1px solid #eee'>{ln.producto_nombre or ''}</td>"
+            f"<td style='padding:6px 10px;border-bottom:1px solid #eee'>{ln.presentacion}</td>"
+            f"<td style='padding:6px 10px;border-bottom:1px solid #eee;text-align:right'>{ln.cantidad_solicitada:,.2f}</td>"
+            f"<td style='padding:6px 10px;border-bottom:1px solid #eee;text-align:right'>{_fmt_money(ln.precio_unitario or _ZERO)}</td>"
+            f"<td style='padding:6px 10px;border-bottom:1px solid #eee;text-align:right'>{_fmt_money(importe)}</td>"
+            "</tr>"
+        )
+    return (
+        "<div style='font-family:Arial,Helvetica,sans-serif;color:#222'>"
+        f"<h2 style='margin:0 0 4px'>Remisión {rem.folio_interno}</h2>"
+        f"<p style='margin:0 0 2px'><strong>Cliente:</strong> {cliente_nombre}</p>"
+        f"<p style='margin:0 0 16px'><strong>Fecha:</strong> {rem.fecha_remision}</p>"
+        "<table style='border-collapse:collapse;width:100%;font-size:14px'>"
+        "<thead><tr style='background:#f5f5f5'>"
+        "<th style='padding:6px 10px;text-align:left'>Producto</th>"
+        "<th style='padding:6px 10px;text-align:left'>Presentación</th>"
+        "<th style='padding:6px 10px;text-align:right'>Cantidad</th>"
+        "<th style='padding:6px 10px;text-align:right'>Precio</th>"
+        "<th style='padding:6px 10px;text-align:right'>Importe</th>"
+        "</tr></thead><tbody>"
+        + "".join(filas)
+        + "</tbody></table>"
+        f"<p style='margin:16px 0 0;text-align:right;font-size:16px'>"
+        f"<strong>Total: {_fmt_money(total)}</strong></p>"
+        "</div>"
+    )
+
+
+@router.post("/{rem_id}/enviar")
+def enviar_remision(
+    rem_id: UUID,
+    payload: EnviarRemisionIn | None = Body(default=None),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    rem = get_or_404(db, Remision, rem_id)
+    cliente = db.query(Cliente).filter(Cliente.id == rem.cliente_facturacion_id).one_or_none()
+
+    to = (payload.to.strip() if payload and payload.to else None)
+    if not to and cliente is not None:
+        to = (cliente.domicilio_fiscal or {}).get("email")
+    if not to:
+        raise HTTPException(status_code=422, detail="El cliente no tiene correo")
+
+    tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one_or_none()
+    if not email_service.configured(tenant):
+        raise HTTPException(status_code=503, detail="El correo no está configurado")
+
+    # Nombres de producto (como get_remision).
+    prod_ids = {ln.producto_id for ln in rem.lineas}
+    names = dict(db.query(Producto.id, Producto.nombre).filter(Producto.id.in_(prod_ids)).all())
+    for ln in rem.lineas:
+        ln.producto_nombre = names.get(ln.producto_id)
+
+    cliente_nombre = cliente.legal_name if cliente else ""
+    html = _build_remision_html(rem, cliente_nombre, rem.lineas)
+
+    try:
+        email_service.send_email(
+            email_service.smtp_config(tenant),
+            [to],
+            f"Remisión {rem.folio_interno}",
+            html,
+        )
+    except Exception as exc:  # noqa: BLE001 — superficie del error al cliente
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"ok": True, "to": to}
 
 
 @router.delete("/{rem_id}", status_code=status.HTTP_204_NO_CONTENT)

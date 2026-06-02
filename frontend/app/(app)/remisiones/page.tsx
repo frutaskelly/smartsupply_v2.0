@@ -72,6 +72,10 @@ export default function RemisionesPage() {
   const productos = productosRes.data?.items ?? [];
   const prodById = useMemo(() => Object.fromEntries(productos.map((p) => [p.id, p])), [productos]);
   const cliName = useMemo(() => Object.fromEntries(clientes.map((c) => [c.id, c.legal_name])), [clientes]);
+  const cliEmail = useMemo(
+    () => Object.fromEntries(clientes.map((c) => [c.id, (c.domicilio_fiscal?.email as string) ?? ""])),
+    [clientes],
+  );
 
   // lista
   const { data, loading, error, reload } = useResource<Page<Remision>>("/api/v1/remisiones?limit=50");
@@ -435,8 +439,35 @@ export default function RemisionesPage() {
     win.document.close(); win.focus(); win.print();
   }
 
-  function enviarRemision(_r: Remision) {
-    toast.error("Para enviar por correo, primero conecta un proveedor de correo en Ajustes.");
+  // ── enviar por correo ──
+  const [toSend, setToSend] = useState<Remision | null>(null);
+  const [sendTo, setSendTo] = useState("");
+  const [sending, setSending] = useState(false);
+
+  function enviarRemision(r: Remision) {
+    setSendTo(cliEmail[r.cliente_facturacion_id] ?? "");
+    setToSend(r);
+  }
+
+  async function confirmarEnvio() {
+    if (!toSend) return;
+    if (!sendTo.trim()) {
+      toast.error("Indica un correo destinatario");
+      return;
+    }
+    setSending(true);
+    try {
+      await apiFetch(`/api/v1/remisiones/${toSend.id}/enviar`, {
+        method: "POST",
+        body: JSON.stringify({ to: sendTo.trim() }),
+      });
+      toast.success(`Remisión enviada a ${sendTo.trim()}`);
+      setToSend(null);
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudo enviar la remisión");
+    } finally {
+      setSending(false);
+    }
   }
 
   const columns: Column<Remision>[] = [
@@ -644,6 +675,32 @@ export default function RemisionesPage() {
       <ConfirmDialog open={toCancel !== null} title="Cancelar remisión"
         message={`¿Cancelar ${toCancel?.folio_interno}? Se liberará el inventario reservado.`}
         onConfirm={cancelar} onClose={() => setToCancel(null)} loading={saving} />
+
+      <Modal
+        open={toSend !== null}
+        onClose={() => setToSend(null)}
+        title={`Enviar remisión ${toSend?.folio_interno ?? ""}`}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setToSend(null)}>Cancelar</Button>
+            <Button onClick={confirmarEnvio} disabled={sending}>
+              <Mail size={16} /> {sending ? "Enviando…" : "Enviar"}
+            </Button>
+          </>
+        }
+      >
+        <p className="mb-3 text-sm text-muted">
+          Se enviará la remisión por correo desde la cuenta configurada en Ajustes › Correo.
+        </p>
+        <Field label="Correo del destinatario" required>
+          <Input
+            type="email"
+            placeholder="cliente@ejemplo.com"
+            value={sendTo}
+            onChange={(e) => setSendTo(e.target.value)}
+          />
+        </Field>
+      </Modal>
     </div>
   );
 }

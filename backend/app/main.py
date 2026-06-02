@@ -13,6 +13,7 @@ from .api.v1 import (
     categorias,
     clientes,
     conversiones,
+    correo,
     esquemas_impuesto,
     facturas,
     inventario,
@@ -99,3 +100,5 @@ app.include_router(sucursales.router, prefix="/api/v1")
 app.include_router(precios.router, prefix="/api/v1")
 # series de folios
 app.include_router(series.router, prefix="/api/v1")
+# correo SMTP del tenant
+app.include_router(correo.router, prefix="/api/v1")
