@@ -1,20 +1,36 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Building2, ShieldCheck, Upload } from "lucide-react";
+import { Building2, CheckCircle2, Pencil, ShieldCheck, Upload } from "lucide-react";
 
 import { Alert } from "@/components/ui/Alert";
+import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Field, Input, Select } from "@/components/ui/Field";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { useToast } from "@/components/ui/Toast";
+import { KeyboardCombobox, type ComboOption } from "@/components/KeyboardCombobox";
 import { ApiError, apiFetch } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import { getSupabase } from "@/lib/supabaseClient";
 
 const WRITE = "membership:gestionar";
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8011";
+
+// Catálogo de entidades federativas (clave de 3 letras del SAT c_Estado).
+const MX_ESTADOS: ComboOption[] = [
+  ["AGU", "Aguascalientes"], ["BCN", "Baja California"], ["BCS", "Baja California Sur"],
+  ["CAM", "Campeche"], ["CHP", "Chiapas"], ["CHH", "Chihuahua"], ["COA", "Coahuila"],
+  ["COL", "Colima"], ["CMX", "Ciudad de México"], ["DUR", "Durango"], ["MEX", "Estado de México"],
+  ["GUA", "Guanajuato"], ["GRO", "Guerrero"], ["HID", "Hidalgo"], ["JAL", "Jalisco"],
+  ["MIC", "Michoacán"], ["MOR", "Morelos"], ["NAY", "Nayarit"], ["NLE", "Nuevo León"],
+  ["OAX", "Oaxaca"], ["PUE", "Puebla"], ["QUE", "Querétaro"], ["ROO", "Quintana Roo"],
+  ["SLP", "San Luis Potosí"], ["SIN", "Sinaloa"], ["SON", "Sonora"], ["TAB", "Tabasco"],
+  ["TAM", "Tamaulipas"], ["TLA", "Tlaxcala"], ["VER", "Veracruz"], ["YUC", "Yucatán"],
+  ["ZAC", "Zacatecas"],
+].map(([value, label]) => ({ value, label }));
 
 const REGIMEN_FISCAL_OPTS: { value: string; label: string }[] = [
   { value: "601", label: "601 — General de Ley Personas Morales" },
@@ -87,6 +103,15 @@ function str(v: unknown): string {
   return typeof v === "string" ? v : v == null ? "" : String(v);
 }
 
+// Acepta una clave SAT ("JAL") o un nombre ("Jalisco") y devuelve la clave.
+function normalizaEstado(v: string): string {
+  const s = v.trim();
+  if (!s) return "";
+  if (MX_ESTADOS.some((o) => o.value === s)) return s;
+  const byLabel = MX_ESTADOS.find((o) => o.label.toLowerCase() === s.toLowerCase());
+  return byLabel ? byLabel.value : s;
+}
+
 export default function EmpresaPage() {
   const { me } = useAuth();
   const toast = useToast();
@@ -96,6 +121,11 @@ export default function EmpresaPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [verifying, setVerifying] = useState(false);
+  const [verified, setVerified] = useState(false);
+  // Modo bloqueado: tras guardar, los campos quedan de solo lectura hasta
+  // confirmar la edición (evita cambios accidentales en datos fiscales).
+  const [locked, setLocked] = useState(false);
+  const [editConfirmOpen, setEditConfirmOpen] = useState(false);
 
   const [csds, setCsds] = useState<Csd[]>([]);
   const [cerFile, setCerFile] = useState<File | null>(null);
@@ -121,12 +151,14 @@ export default function EmpresaPage() {
           calle: str(dom.calle),
           colonia: str(dom.colonia),
           ciudad: str(dom.ciudad),
-          estado: str(dom.estado),
+          estado: normalizaEstado(str(dom.estado)),
           pais: str(dom.pais),
         });
+        // Si ya hay datos fiscales guardados, arranca bloqueado.
+        if ((e.legal_name || "").trim() || (e.rfc || "").trim()) setLocked(true);
       })
       .catch(() => {
-        /* sin datos previos: deja el formulario vacío */
+        /* sin datos previos: deja el formulario vacío (modo edición) */
       })
       .finally(() => setLoading(false));
     loadCsds();
@@ -149,6 +181,7 @@ export default function EmpresaPage() {
         `/api/v1/clientes/validar-rfc?rfc=${encodeURIComponent(rfc)}`,
       );
       const ok = r.FormatoCorrecto && r.Activo && r.Localizado;
+      setVerified(ok);
       if (ok) {
         toast.success("RFC verificado: activo y localizado en el SAT");
       } else {
@@ -194,6 +227,7 @@ export default function EmpresaPage() {
         }),
       });
       toast.success("Datos fiscales guardados");
+      setLocked(true);
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo guardar");
     } finally {
@@ -251,6 +285,9 @@ export default function EmpresaPage() {
     }
   }
 
+  // Solo lectura mientras no se esté editando (loading, sin permiso o bloqueado).
+  const ro = !canWrite || loading || locked;
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -266,32 +303,41 @@ export default function EmpresaPage() {
                 placeholder="Empresa SA de CV"
                 value={form.legal_name}
                 onChange={(e) => set({ legal_name: e.target.value })}
-                disabled={!canWrite || loading}
+                disabled={ro}
               />
             </Field>
           </div>
           <Field label="RFC" required>
-            <div className="flex gap-2">
+            <div className="flex items-center gap-2">
               <Input
                 placeholder="XAXX010101000"
                 value={form.rfc}
-                onChange={(e) => set({ rfc: e.target.value.toUpperCase() })}
-                disabled={!canWrite || loading}
+                onChange={(e) => {
+                  set({ rfc: e.target.value.toUpperCase() });
+                  setVerified(false); // cualquier cambio invalida la verificación previa
+                }}
+                disabled={ro}
               />
-              <Button
-                variant="secondary"
-                onClick={verificarRfc}
-                disabled={verifying || loading}
-              >
-                <ShieldCheck size={16} /> {verifying ? "Verificando…" : "Verificar RFC"}
-              </Button>
+              {verified ? (
+                <Badge tone="success">
+                  <CheckCircle2 size={12} className="mr-1" /> Verificado
+                </Badge>
+              ) : (
+                <Button
+                  variant="secondary"
+                  onClick={verificarRfc}
+                  disabled={verifying || loading || locked}
+                >
+                  <ShieldCheck size={16} /> {verifying ? "Verificando…" : "Verificar RFC"}
+                </Button>
+              )}
             </div>
           </Field>
           <Field label="Régimen fiscal SAT">
             <Select
               value={form.regimen_fiscal_sat}
               onChange={(e) => set({ regimen_fiscal_sat: e.target.value })}
-              disabled={!canWrite || loading}
+              disabled={ro}
             >
               <option value="">— Selecciona —</option>
               {REGIMEN_FISCAL_OPTS.map((o) => (
@@ -306,7 +352,7 @@ export default function EmpresaPage() {
               placeholder="11000"
               value={form.domicilio_fiscal_cp}
               onChange={(e) => set({ domicilio_fiscal_cp: e.target.value })}
-              disabled={!canWrite || loading}
+              disabled={ro}
             />
           </Field>
           <div className="sm:col-span-2">
@@ -314,7 +360,7 @@ export default function EmpresaPage() {
               <Input
                 value={form.calle}
                 onChange={(e) => set({ calle: e.target.value })}
-                disabled={!canWrite || loading}
+                disabled={ro}
               />
             </Field>
           </div>
@@ -322,37 +368,51 @@ export default function EmpresaPage() {
             <Input
               value={form.colonia}
               onChange={(e) => set({ colonia: e.target.value })}
-              disabled={!canWrite || loading}
+              disabled={ro}
             />
           </Field>
           <Field label="Ciudad/Municipio">
             <Input
               value={form.ciudad}
               onChange={(e) => set({ ciudad: e.target.value })}
-              disabled={!canWrite || loading}
+              disabled={ro}
             />
           </Field>
           <Field label="Estado">
-            <Input
+            <KeyboardCombobox
+              options={MX_ESTADOS}
               value={form.estado}
-              onChange={(e) => set({ estado: e.target.value })}
-              disabled={!canWrite || loading}
+              onSelect={(v) => set({ estado: v })}
+              disabled={ro}
+              placeholder="Busca tu estado…"
+              emptyText="Sin coincidencias"
             />
           </Field>
           <Field label="País">
             <Input
               value={form.pais}
               onChange={(e) => set({ pais: e.target.value })}
-              disabled={!canWrite || loading}
+              disabled={ro}
             />
           </Field>
         </div>
 
         {canWrite && (
-          <div className="mt-4 border-t border-border pt-4">
-            <Button onClick={guardar} disabled={saving || loading}>
-              <Building2 size={16} /> {saving ? "Guardando…" : "Guardar"}
-            </Button>
+          <div className="mt-4 flex items-center gap-2 border-t border-border pt-4">
+            {locked ? (
+              <Button variant="secondary" onClick={() => setEditConfirmOpen(true)} disabled={loading}>
+                <Pencil size={16} /> Editar
+              </Button>
+            ) : (
+              <Button onClick={guardar} disabled={saving || loading}>
+                <Building2 size={16} /> {saving ? "Guardando…" : "Guardar"}
+              </Button>
+            )}
+            {locked && (
+              <span className="text-xs text-muted">
+                Datos bloqueados. Pulsa Editar para modificarlos.
+              </span>
+            )}
           </div>
         )}
       </Card>
@@ -432,6 +492,19 @@ export default function EmpresaPage() {
           </div>
         </div>
       </Card>
+
+      <ConfirmDialog
+        open={editConfirmOpen}
+        title="Editar datos fiscales"
+        message="Estás a punto de modificar los datos fiscales del emisor. Estos datos aparecen en los CFDIs timbrados. ¿Deseas continuar?"
+        confirmLabel="Sí, editar"
+        confirmVariant="primary"
+        onConfirm={() => {
+          setLocked(false);
+          setEditConfirmOpen(false);
+        }}
+        onClose={() => setEditConfirmOpen(false)}
+      />
     </div>
   );
 }

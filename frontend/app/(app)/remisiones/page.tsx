@@ -5,6 +5,7 @@ import { Check, ClipboardPaste, FileText, Mail, Plus, Printer, Trash2, X } from 
 
 import { KeyboardCombobox, type ComboOption } from "@/components/KeyboardCombobox";
 import { ProductoCombobox, type ProductoPick } from "@/components/ProductoCombobox";
+import { Alert } from "@/components/ui/Alert";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -337,8 +338,17 @@ export default function RemisionesPage() {
       // se crea — así un segundo clic/disparo no genera una remisión duplicada.
       const rem = await post<RemisionDetail>("/api/v1/remisiones", payload);
       if (confirmar) {
-        await post(`/api/v1/remisiones/${rem.id}/confirmar`, {});
-        toast.success(`Remisión ${rem.folio_interno} confirmada (inventario reservado)`);
+        try {
+          await post(`/api/v1/remisiones/${rem.id}/confirmar`, {});
+          toast.success(`Remisión ${rem.folio_interno} confirmada (inventario reservado)`);
+        } catch (e) {
+          // Sin existencia: la remisión ya quedó como borrador; ofrecemos sobregiro.
+          if (e instanceof ApiError && /existencia insuficiente/i.test(e.message)) {
+            setNegStock({ remId: rem.id, folio: rem.folio_interno });
+            return;
+          }
+          throw e;
+        }
       } else {
         toast.success(`Remisión ${rem.folio_interno} guardada (borrador)`);
       }
@@ -355,6 +365,9 @@ export default function RemisionesPage() {
   const [detalleLoading, setDetalleLoading] = useState<Set<string>>(new Set());
   const [toConfirm, setToConfirm] = useState<Remision | null>(null);
   const [toCancel, setToCancel] = useState<Remision | null>(null);
+  // Sobregiro: cuando confirmar falla por existencia insuficiente, ofrecemos
+  // confirmar de todas formas dejando el inventario en negativo.
+  const [negStock, setNegStock] = useState<{ remId: string; folio: string } | null>(null);
 
   async function verDetalle(r: Remision) {
     if (detalles[r.id] || detalleLoading.has(r.id)) return; // ya cargado / en curso
@@ -417,6 +430,24 @@ export default function RemisionesPage() {
       await post(`/api/v1/remisiones/${toConfirm.id}/confirmar`, {});
       toast.success("Remisión confirmada (stock reservado)");
       setToConfirm(null); reload();
+    } catch (e) {
+      if (e instanceof ApiError && /existencia insuficiente/i.test(e.message)) {
+        setNegStock({ remId: toConfirm.id, folio: toConfirm.folio_interno });
+        setToConfirm(null);
+        return;
+      }
+      toast.error(e instanceof ApiError ? e.message : "No se pudo confirmar");
+    }
+  }
+  // Reintenta la confirmación autorizando el sobregiro (inventario negativo).
+  async function confirmarNegativo() {
+    if (!negStock) return;
+    try {
+      await post(`/api/v1/remisiones/${negStock.remId}/confirmar`, { permitir_negativos: true });
+      toast.success(`Remisión ${negStock.folio} confirmada (inventario en negativo)`);
+      setNegStock(null);
+      setMode("list");
+      reload();
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo confirmar");
     }
@@ -527,10 +558,65 @@ export default function RemisionesPage() {
   // ── acciones en lote sobre las remisiones seleccionadas ──
   const [bulkBusy, setBulkBusy] = useState(false);
   const [facturarOpen, setFacturarOpen] = useState(false);
+  const [confirmarBulkOpen, setConfirmarBulkOpen] = useState(false);
+  // Cancelación masiva con doble verificación: paso 1 → paso 2 → ejecuta.
+  const [cancelBulkStep, setCancelBulkStep] = useState<0 | 1 | 2>(0);
 
   // Imprimir todas las seleccionadas en una sola ventana.
   async function bulkImprimir() {
     await printRemisiones(selected);
+  }
+
+  // Confirmar en lote las remisiones en BORRADOR seleccionadas (reserva stock).
+  async function bulkConfirmar() {
+    const elegibles = selected.filter((r) => r.estado === "BORRADOR");
+    if (elegibles.length === 0) {
+      toast.error("No hay remisiones en borrador en la selección");
+      setConfirmarBulkOpen(false);
+      return;
+    }
+    setBulkBusy(true);
+    try {
+      const results = await Promise.allSettled(
+        elegibles.map((r) => post(`/api/v1/remisiones/${r.id}/confirmar`, {})),
+      );
+      const ok = results.filter((x) => x.status === "fulfilled").length;
+      const fail = results.length - ok;
+      const partes = [`Confirmadas: ${ok}`];
+      if (fail) partes.push(`${fail} con error (p. ej. sin existencia)`);
+      toast[fail === 0 ? "success" : "error"](partes.join(" · "));
+      setConfirmarBulkOpen(false);
+      clearSelection();
+      reload();
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  // Cancelar en lote (libera inventario de las confirmadas). Doble verificación.
+  async function bulkCancelar() {
+    const elegibles = selected.filter((r) => r.estado !== "CANCELADA");
+    if (elegibles.length === 0) {
+      toast.error("No hay remisiones cancelables en la selección");
+      setCancelBulkStep(0);
+      return;
+    }
+    setBulkBusy(true);
+    try {
+      const results = await Promise.allSettled(
+        elegibles.map((r) => post(`/api/v1/remisiones/${r.id}/cancelar`, {})),
+      );
+      const ok = results.filter((x) => x.status === "fulfilled").length;
+      const fail = results.length - ok;
+      const partes = [`Canceladas: ${ok}`];
+      if (fail) partes.push(`${fail} con error`);
+      toast[fail === 0 ? "success" : "error"](partes.join(" · "));
+      setCancelBulkStep(0);
+      clearSelection();
+      reload();
+    } finally {
+      setBulkBusy(false);
+    }
   }
 
   // Enviar por correo cada seleccionada (destinatario por defecto en backend).
@@ -550,10 +636,11 @@ export default function RemisionesPage() {
   }
 
   // Facturar las seleccionadas. `modo`:
-  //  - "acumulado": una factura por cliente (agrupa por cliente_facturacion_id)
+  //  - "sumar":     una factura por cliente, sumando líneas del mismo producto en un concepto
+  //  - "sin_sumar": una factura por cliente, una línea por cada partida de remisión
   //  - "separado":  una factura por remisión
   // Solo elegibles: CONFIRMADA y sin factura_id. El resto se omite.
-  async function bulkFacturar(modo: "acumulado" | "separado") {
+  async function bulkFacturar(modo: "sumar" | "sin_sumar" | "separado") {
     const elegibles = selected.filter((r) => r.estado === "CONFIRMADA" && !r.factura_id);
     const omitidas = selected.length - elegibles.length;
     if (elegibles.length === 0) {
@@ -563,7 +650,9 @@ export default function RemisionesPage() {
     }
     // grupos de ids según el modo
     let grupos: string[][];
-    if (modo === "acumulado") {
+    if (modo === "separado") {
+      grupos = elegibles.map((r) => [r.id]);
+    } else {
       const byCliente = new Map<string, string[]>();
       for (const r of elegibles) {
         const arr = byCliente.get(r.cliente_facturacion_id) ?? [];
@@ -571,14 +660,13 @@ export default function RemisionesPage() {
         byCliente.set(r.cliente_facturacion_id, arr);
       }
       grupos = [...byCliente.values()];
-    } else {
-      grupos = elegibles.map((r) => [r.id]);
     }
+    const agrupar_productos = modo === "sumar";
     setBulkBusy(true);
     try {
       const results = await Promise.allSettled(
         grupos.map((remision_ids) =>
-          post("/api/v1/facturas/desde-remisiones", { remision_ids }),
+          post("/api/v1/facturas/desde-remisiones", { remision_ids, agrupar_productos }),
         ),
       );
       const creadas = results.filter((x) => x.status === "fulfilled").length;
@@ -613,7 +701,8 @@ export default function RemisionesPage() {
     { id: "cancelar", label: "Cancelar", icon: <X size={15} />, tone: "danger",
       onClick: (r) => setToCancel(r), hidden: (r) => !(canWrite && r.estado !== "CANCELADA") },
     { id: "imprimir", label: "Imprimir", icon: <Printer size={15} />, onClick: (r) => { void imprimirRemision(r); } },
-    { id: "enviar", label: "Enviar por correo", icon: <Mail size={15} />, onClick: enviarRemision },
+    { id: "enviar", label: "Enviar por correo", icon: <Mail size={15} />, onClick: enviarRemision,
+      hidden: () => !canWrite },
   ];
 
   // ───────────────────────── render ─────────────────────────
@@ -777,6 +866,16 @@ export default function RemisionesPage() {
     );
   }
 
+  // Remisiones elegibles a facturar dentro de la selección y sus clientes distintos.
+  // Una sola factura solo es válida con un único cliente: si hay varios, esas
+  // opciones se deshabilitan en el popup (solo queda "Separado").
+  const facturarElegibles = selected.filter((r) => r.estado === "CONFIRMADA" && !r.factura_id);
+  const clientesElegibles = [...new Set(facturarElegibles.map((r) => r.cliente_facturacion_id))];
+  const multiCliente = clientesElegibles.length > 1;
+  // Borradores (confirmables) y no-canceladas (cancelables) dentro de la selección.
+  const borradoresSel = selected.filter((r) => r.estado === "BORRADOR");
+  const cancelablesSel = selected.filter((r) => r.estado !== "CANCELADA");
+
   return (
     <div>
       <PageHeader
@@ -822,9 +921,19 @@ export default function RemisionesPage() {
                 <Mail size={16} /> Enviar por correo ({selected.length})
               </Button>
             )}
+            {canWrite && borradoresSel.length > 0 && (
+              <Button variant="success" onClick={() => setConfirmarBulkOpen(true)} disabled={bulkBusy}>
+                <Check size={16} /> Confirmar ({borradoresSel.length})
+              </Button>
+            )}
             {canWrite && (
               <Button onClick={() => setFacturarOpen(true)} disabled={bulkBusy}>
                 <FileText size={16} /> Facturar ({selected.length})
+              </Button>
+            )}
+            {canWrite && cancelablesSel.length > 0 && (
+              <Button variant="danger" onClick={() => setCancelBulkStep(1)} disabled={bulkBusy}>
+                <X size={16} /> Cancelar ({cancelablesSel.length})
               </Button>
             )}
           </div>
@@ -856,10 +965,31 @@ export default function RemisionesPage() {
 
       <ConfirmDialog open={toConfirm !== null} title="Confirmar remisión"
         message={`¿Confirmar ${toConfirm?.folio_interno}? Se reservará el inventario.`}
+        confirmLabel="Confirmar" confirmVariant="success"
         onConfirm={confirmar} onClose={() => setToConfirm(null)} loading={saving} />
       <ConfirmDialog open={toCancel !== null} title="Cancelar remisión"
         message={`¿Cancelar ${toCancel?.folio_interno}? Se liberará el inventario reservado.`}
         onConfirm={cancelar} onClose={() => setToCancel(null)} loading={saving} />
+      <ConfirmDialog open={negStock !== null} title="Existencia insuficiente"
+        message={`No hay existencia suficiente para confirmar ${negStock?.folio}. ¿Deseas remisionar de todas formas? El inventario quedará en negativo (sobregiro).`}
+        confirmLabel="Remisionar sin existencias" confirmVariant="primary"
+        onConfirm={confirmarNegativo} onClose={() => setNegStock(null)} loading={saving} />
+
+      {/* Confirmar en lote (borradores → reserva inventario) */}
+      <ConfirmDialog open={confirmarBulkOpen} title="Confirmar remisiones"
+        message={`¿Confirmar ${borradoresSel.length} remisión(es) en borrador? Se reservará el inventario de cada una. Las que no tengan existencia suficiente se reportarán como error.`}
+        confirmLabel="Confirmar" confirmVariant="success"
+        onConfirm={() => { void bulkConfirmar(); }} onClose={() => setConfirmarBulkOpen(false)} loading={bulkBusy} />
+
+      {/* Cancelar en lote — doble verificación */}
+      <ConfirmDialog open={cancelBulkStep === 1} title="Cancelar remisiones"
+        message={`Vas a cancelar ${cancelablesSel.length} remisión(es). Se liberará el inventario reservado de las confirmadas. ¿Continuar?`}
+        confirmLabel="Continuar" confirmVariant="danger"
+        onConfirm={() => setCancelBulkStep(2)} onClose={() => setCancelBulkStep(0)} loading={bulkBusy} />
+      <ConfirmDialog open={cancelBulkStep === 2} title="Confirmación final"
+        message={`Esta acción no se puede deshacer. Se cancelarán ${cancelablesSel.length} remisión(es) de forma definitiva. ¿Confirmas la cancelación?`}
+        confirmLabel="Sí, cancelar definitivamente" confirmVariant="danger"
+        onConfirm={() => { void bulkCancelar(); }} onClose={() => setCancelBulkStep(0)} loading={bulkBusy} />
 
       <Modal
         open={toSend !== null}
@@ -892,24 +1022,57 @@ export default function RemisionesPage() {
         onClose={() => setFacturarOpen(false)}
         title={`Facturar ${selected.length} remisión(es)`}
         footer={
-          <>
-            <Button variant="secondary" onClick={() => setFacturarOpen(false)} disabled={bulkBusy}>Cancelar</Button>
-            <Button variant="secondary" onClick={() => { void bulkFacturar("separado"); }} disabled={bulkBusy}>
-              Separado
-            </Button>
-            <Button onClick={() => { void bulkFacturar("acumulado"); }} disabled={bulkBusy}>
-              Acumulado
-            </Button>
-          </>
+          <Button variant="secondary" onClick={() => setFacturarOpen(false)} disabled={bulkBusy}>Cerrar</Button>
         }
       >
-        <p className="mb-2 text-sm text-muted">
+        <p className="mb-3 text-sm text-muted">
           Solo se facturan las remisiones <strong>confirmadas</strong> y sin factura previa; el resto se omite.
+          Elige cómo generar la(s) factura(s):
         </p>
-        <ul className="ml-4 list-disc text-sm text-muted">
-          <li><strong>Acumulado</strong>: una factura por cliente (agrupa las remisiones de cada cliente).</li>
-          <li><strong>Separado</strong>: una factura por cada remisión.</li>
-        </ul>
+        {multiCliente && (
+          <div className="mb-3">
+            <Alert tone="warning">
+              Seleccionaste remisiones de <strong>{clientesElegibles.length} clientes distintos</strong>.
+              No se puede emitir una sola factura con varios clientes; usa <strong>Separado</strong>
+              {" "}(una factura por remisión).
+            </Alert>
+          </div>
+        )}
+        <div className="flex flex-col gap-2">
+          <button
+            type="button"
+            disabled={bulkBusy || multiCliente}
+            title={multiCliente ? "No disponible: la selección tiene varios clientes" : undefined}
+            onClick={() => { void bulkFacturar("sumar"); }}
+            className="rounded-lg border border-border p-3 text-left transition hover:border-accent hover:bg-accent/5 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-border disabled:hover:bg-transparent"
+          >
+            <div className="font-medium">Sumatoria de productos en una factura</div>
+            <div className="text-sm text-muted">
+              Una factura. Las líneas del mismo producto se suman en un solo concepto.
+            </div>
+          </button>
+          <button
+            type="button"
+            disabled={bulkBusy || multiCliente}
+            title={multiCliente ? "No disponible: la selección tiene varios clientes" : undefined}
+            onClick={() => { void bulkFacturar("sin_sumar"); }}
+            className="rounded-lg border border-border p-3 text-left transition hover:border-accent hover:bg-accent/5 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-border disabled:hover:bg-transparent"
+          >
+            <div className="font-medium">Productos sin sumatoria en una factura</div>
+            <div className="text-sm text-muted">
+              Una factura. Cada partida de cada remisión queda como una línea independiente.
+            </div>
+          </button>
+          <button
+            type="button"
+            disabled={bulkBusy}
+            onClick={() => { void bulkFacturar("separado"); }}
+            className="rounded-lg border border-border p-3 text-left transition hover:border-accent hover:bg-accent/5 disabled:opacity-50"
+          >
+            <div className="font-medium">Separado</div>
+            <div className="text-sm text-muted">Una factura por cada remisión.</div>
+          </button>
+        </div>
       </Modal>
     </div>
   );

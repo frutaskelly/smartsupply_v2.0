@@ -233,6 +233,8 @@ def confirmar_remision(
 
     # Optional per-line real weights (catch-weight); override the estimate.
     pesos = {p.linea_id: p.cantidad_base for p in (payload.pesos or [])} if payload else {}
+    # Sobregiro autorizado: confirma sin existencia suficiente (inventario negativo).
+    permitir_negativos = bool(payload.permitir_negativos) if payload else False
 
     # Lines carry a presentation + a quantity in that presentation; reserve the
     # equivalent in base units (the unit inventory is stored in). The reserved
@@ -245,8 +247,13 @@ def confirmar_remision(
         factor = presentacion_factor(productos.get(ln.producto_id), ln.presentacion)
         real = pesos.get(ln.id)
         base_qty = real if real is not None else (ln.cantidad_solicitada * factor)
-        lote = resolve_lote(db, ctx.tenant_id, ln.producto_id, rem.almacen_id, numero_lote=None, create=False)
-        if lote is None or lote.cantidad_disponible < base_qty:
+        # Con sobregiro autorizado creamos el lote por defecto si no existe, para
+        # poder reservar contra él (la disponible quedará en negativo).
+        lote = resolve_lote(
+            db, ctx.tenant_id, ln.producto_id, rem.almacen_id,
+            numero_lote=None, create=permitir_negativos,
+        )
+        if lote is None or (not permitir_negativos and lote.cantidad_disponible < base_qty):
             raise HTTPException(
                 status_code=422,
                 detail=f"Existencia insuficiente para la línea {ln.numero_linea}",

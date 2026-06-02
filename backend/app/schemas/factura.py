@@ -18,6 +18,8 @@ class FacturaDesdeRemisionesIn(BaseModel):
     forma_pago: Optional[str] = Field(default=None, max_length=5)
     metodo_pago: Optional[str] = Field(default=None, max_length=5)
     notas: Optional[str] = None
+    # True = suma las líneas del mismo producto/unidad en un solo concepto.
+    agrupar_productos: bool = Field(default=False)
 
 
 class CancelarFacturaIn(BaseModel):

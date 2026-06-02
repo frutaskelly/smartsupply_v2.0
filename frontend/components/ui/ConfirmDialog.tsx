@@ -18,8 +18,9 @@ export function ConfirmDialog({
   message: string;
   confirmLabel?: string;
   /** Estilo del botón de confirmar. `danger` (rojo, por defecto) para acciones
-   *  destructivas; `primary` para confirmaciones no destructivas. */
-  confirmVariant?: "danger" | "primary";
+   *  destructivas; `primary` (azul) o `success` (verde) para confirmaciones
+   *  no destructivas. */
+  confirmVariant?: "danger" | "primary" | "success";
   onConfirm: () => void;
   onClose: () => void;
   loading?: boolean;
