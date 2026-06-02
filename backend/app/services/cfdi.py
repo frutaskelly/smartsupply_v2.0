@@ -103,11 +103,19 @@ def build_payload(db: Session, factura: Factura) -> dict:
         "PaymentMethod": factura.metodo_pago or "PUE",
         "Currency": factura.moneda or "MXN",
         "ExpeditionPlace": expedition,
-        "Serie": factura.serie,
-        "Folio": factura.folio,
         "Receiver": _receptor(factura, cliente, tenant, expedition),
         "Items": items,
     }
+
+    # Serie/Folio: Facturama SOLO acepta series registradas en la cuenta/sucursal.
+    # v2 maneja su propia serie/folio internamente (no se sobreescriben al timbrar),
+    # así que por defecto NO se envían al PAC y Facturama asigna su folio. Enviar una
+    # serie no registrada (p. ej. "SLP") provoca 400 "El atributo 'Serie' debe existir
+    # en la sucursal". Si la cuenta tiene sus series dadas de alta, activar
+    # FACTURAMA_SEND_SERIE para enviarlas.
+    if getattr(settings, "FACTURAMA_SEND_SERIE", False) and factura.serie:
+        payload["Serie"] = factura.serie
+        payload["Folio"] = factura.folio
 
     # Público en general = factura global: requiere Información Global (periodicidad/mes/año).
     if cliente.rfc == _RFC_PUBLICO:

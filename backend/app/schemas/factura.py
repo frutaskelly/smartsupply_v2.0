@@ -27,6 +27,25 @@ class CancelarFacturaIn(BaseModel):
     uuid_sustitucion: Optional[uuid.UUID] = None
 
 
+class LineaFacturaDirectaIn(BaseModel):
+    producto_id: uuid.UUID
+    cantidad: Decimal = Field(gt=0)
+    precio_unitario: Decimal = Field(ge=0)
+    presentacion: Optional[str] = Field(default=None, max_length=20)
+
+
+class FacturaDirectaIn(BaseModel):
+    """Factura capturada a mano: sin remisión y sin afectar inventario."""
+    cliente_id: uuid.UUID
+    serie_id: Optional[uuid.UUID] = None
+    serie: Optional[str] = Field(default=None, max_length=10)
+    uso_cfdi: Optional[str] = Field(default=None, max_length=5)
+    forma_pago: Optional[str] = Field(default=None, max_length=5)
+    metodo_pago: Optional[str] = Field(default=None, max_length=5)
+    notas: Optional[str] = None
+    lineas: List[LineaFacturaDirectaIn] = Field(min_length=1)
+
+
 class LineaFacturaOut(ORMModel):
     numero_linea: int
     producto_id: uuid.UUID
