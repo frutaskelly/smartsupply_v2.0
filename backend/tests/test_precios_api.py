@@ -80,7 +80,8 @@ def env(db_engine):
 
         yield {"admin": admin, "tomador": tomador, "aguacate": str(prod.id),
                "cli1": str(cli1.id), "cli3": str(cli3.id),
-               "slp": str(slp.id), "qro": str(qro.id), "otra": str(otra.id)}
+               "slp": str(slp.id), "qro": str(qro.id), "otra": str(otra.id),
+               "unico": str(unico.id), "menudeo": str(menudeo.id)}
     finally:
         for table in _PURGE:
             for t in created["tenants"]:
@@ -160,6 +161,59 @@ def test_override_xor_validation(client, env, auth_as):
     # solo cliente → 201
     assert client.post("/api/v1/precios/overrides", headers=h, json={
         "cliente_id": env["cli3"], "producto_id": env["aguacate"], "precio_unitario": "10"}).status_code == 201
+
+
+def test_copiar_precios(client, env, auth_as):
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    # nueva lista vacía
+    dest = client.post("/api/v1/listas-precios", headers=h,
+                       json={"codigo": "COPIA", "nombre": "Copia"}).json()["id"]
+    # MENUDEO tiene 2 precios (tier 1 y tier 10) → ambos se copian
+    r = client.post(f"/api/v1/listas-precios/{dest}/copiar", headers=h,
+                    json={"origen_id": env["menudeo"]})
+    assert r.status_code == 200, r.text
+    assert r.json() == {"created": 2, "updated": 0, "skipped": 0}
+    assert client.get(f"/api/v1/listas-precios/{dest}/precios", headers=h).json()["total"] == 2
+    # copiar de nuevo → todo duplicado, nada creado
+    r2 = client.post(f"/api/v1/listas-precios/{dest}/copiar", headers=h,
+                     json={"origen_id": env["menudeo"]})
+    assert r2.json() == {"created": 0, "updated": 0, "skipped": 2}
+    # origen == destino → 422
+    assert client.post(f"/api/v1/listas-precios/{dest}/copiar", headers=h,
+                       json={"origen_id": dest}).status_code == 422
+
+
+def test_copiar_rbac(client, env, auth_as):
+    auth_as(env["tomador"]); h = _hdr(env["tomador"])
+    assert client.post(f"/api/v1/listas-precios/{env['unico']}/copiar", headers=h,
+                       json={"origen_id": env["menudeo"]}).status_code == 403
+
+
+def test_bulk_upsert_precios(client, env, auth_as):
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    dest = client.post("/api/v1/listas-precios", headers=h,
+                       json={"codigo": "BULK", "nombre": "Bulk"}).json()["id"]
+    items = [
+        {"producto_id": env["aguacate"], "presentacion": "KILO", "precio_unitario": "30", "cantidad_minima": 1},
+        {"producto_id": env["aguacate"], "presentacion": "KILO", "precio_unitario": "27", "cantidad_minima": 10},
+    ]
+    r = client.post(f"/api/v1/listas-precios/{dest}/precios/bulk", headers=h, json={"items": items})
+    assert r.status_code == 200, r.text
+    assert r.json() == {"created": 2, "updated": 0, "skipped": 0}
+    # re-enviar con un precio cambiado → se actualiza, no duplica
+    items[0]["precio_unitario"] = "31"
+    r2 = client.post(f"/api/v1/listas-precios/{dest}/precios/bulk", headers=h, json={"items": items})
+    assert r2.json() == {"created": 0, "updated": 2, "skipped": 0}
+    page = client.get(f"/api/v1/listas-precios/{dest}/precios", headers=h).json()
+    assert page["total"] == 2
+    tier1 = next(p for p in page["items"] if p["cantidad_minima"] == 1)
+    assert float(tier1["precio_unitario"]) == 31.0
+
+
+def test_bulk_rbac(client, env, auth_as):
+    auth_as(env["tomador"]); h = _hdr(env["tomador"])
+    assert client.post(f"/api/v1/listas-precios/{env['unico']}/precios/bulk", headers=h,
+                       json={"items": []}).status_code == 403
 
 
 def test_rbac(client, env, auth_as):

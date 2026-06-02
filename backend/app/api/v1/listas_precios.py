@@ -22,6 +22,9 @@ from ...schemas.lista_precios import (
     ListaPreciosCreate,
     ListaPreciosOut,
     ListaPreciosUpdate,
+    PrecioBulkRequest,
+    PrecioBulkResult,
+    PrecioCopiarRequest,
     PrecioCreate,
     PrecioOut,
     PrecioUpdate,
@@ -108,6 +111,59 @@ def delete_lista(
     return None
 
 
+# ─── copy prices from another list ───────────────────────────────────────────
+@router.post("/{lista_id}/copiar", response_model=PrecioBulkResult)
+def copiar_precios(
+    lista_id: UUID,
+    payload: PrecioCopiarRequest,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """Copy ALL precios from `origen_id` into `lista_id`, skipping duplicates.
+
+    A row is a duplicate when the destination already has a precio for the same
+    (producto, presentación, cantidad_minima) tier.
+    """
+    get_or_404(db, ListaPrecios, lista_id)
+    get_or_404(db, ListaPrecios, payload.origen_id)  # 404 if origen isn't ours
+    if payload.origen_id == lista_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="La lista de origen no puede ser la misma que el destino",
+        )
+
+    origen_precios = db.query(Precio).filter(Precio.lista_id == payload.origen_id).all()
+    existing = {
+        (p.producto_id, p.presentacion, p.cantidad_minima)
+        for p in db.query(Precio).filter(Precio.lista_id == lista_id).all()
+    }
+
+    created = 0
+    skipped = 0
+    for src in origen_precios:
+        key = (src.producto_id, src.presentacion, src.cantidad_minima)
+        if key in existing:
+            skipped += 1
+            continue
+        db.add(
+            Precio(
+                tenant_id=ctx.tenant_id,
+                lista_id=lista_id,
+                producto_id=src.producto_id,
+                presentacion=src.presentacion,
+                precio_unitario=src.precio_unitario,
+                cantidad_minima=src.cantidad_minima,
+                vigencia_desde=src.vigencia_desde,
+                vigencia_hasta=src.vigencia_hasta,
+            )
+        )
+        existing.add(key)
+        created += 1
+
+    db.flush()
+    return PrecioBulkResult(created=created, updated=0, skipped=skipped)
+
+
 # ─── prices (nested under a list) ────────────────────────────────────────────
 @router.get("/{lista_id}/precios", response_model=Page[PrecioOut])
 def list_precios(
@@ -148,6 +204,56 @@ def create_precio(
     flush_or_conflict(db, detail=_DUP_PRECIO)
     db.refresh(obj)
     return obj
+
+
+@router.post("/{lista_id}/precios/bulk", response_model=PrecioBulkResult)
+def bulk_upsert_precios(
+    lista_id: UUID,
+    payload: PrecioBulkRequest,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """Upsert many precios at once.
+
+    For each item, if a precio already exists for the same
+    (producto, presentación, cantidad_minima) tier its `precio_unitario` is
+    overwritten; otherwise a new row is created. Productos outside the tenant
+    scope are rejected.
+    """
+    get_or_404(db, ListaPrecios, lista_id)
+
+    existing = {
+        (p.producto_id, p.presentacion, p.cantidad_minima): p
+        for p in db.query(Precio).filter(Precio.lista_id == lista_id).all()
+    }
+    validated_productos: set = set()
+
+    created = 0
+    updated = 0
+    for item in payload.items:
+        if item.producto_id not in validated_productos:
+            ensure_fk(db, Producto, item.producto_id, "producto_id")
+            validated_productos.add(item.producto_id)
+        key = (item.producto_id, item.presentacion, item.cantidad_minima)
+        current = existing.get(key)
+        if current is not None:
+            current.precio_unitario = item.precio_unitario
+            updated += 1
+        else:
+            obj = Precio(
+                tenant_id=ctx.tenant_id,
+                lista_id=lista_id,
+                producto_id=item.producto_id,
+                presentacion=item.presentacion,
+                precio_unitario=item.precio_unitario,
+                cantidad_minima=item.cantidad_minima,
+            )
+            db.add(obj)
+            existing[key] = obj
+            created += 1
+
+    flush_or_conflict(db, detail=_DUP_PRECIO)
+    return PrecioBulkResult(created=created, updated=updated, skipped=0)
 
 
 @router.patch("/{lista_id}/precios/{precio_id}", response_model=PrecioOut)

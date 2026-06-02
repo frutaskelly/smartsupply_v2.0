@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Pencil, Plus, Tag, Trash2 } from "lucide-react";
+import { ListPlus, Pencil, Plus, Tag, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -17,9 +17,22 @@ import { ApiError, apiFetch } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import { fmtMoney } from "@/lib/format";
 import { useMutation, useResource, type Page } from "@/lib/hooks";
-import type { ListaPrecios, Precio, Producto } from "@/lib/types";
+import type { Categoria, ListaPrecios, Precio, Producto } from "@/lib/types";
 
 const WRITE = "lista_precios:gestionar";
+
+/** Presentación options for a producto: its declared presentaciones keys. */
+function presentacionOptions(p: Producto | undefined): string[] {
+  if (!p) return [];
+  const keys = Object.keys(p.presentaciones ?? {});
+  return keys.length > 0 ? keys : [];
+}
+
+/** Default presentación for a producto: presentacion_default, else unidad_base. */
+function defaultPresentacion(p: Producto | undefined): string {
+  if (!p) return "";
+  return p.presentacion_default ?? p.unidad_base ?? Object.keys(p.presentaciones ?? {})[0] ?? "";
+}
 
 export default function ListasPreciosPage() {
   const { me } = useAuth();
@@ -28,16 +41,22 @@ export default function ListasPreciosPage() {
   const { post, patch, del, loading: saving } = useMutation();
 
   const listasRes = useResource<Page<ListaPrecios>>("/api/v1/listas-precios?limit=200");
-  const productosRes = useResource<Page<Producto>>("/api/v1/productos?limit=200");
+  const productosRes = useResource<Page<Producto>>("/api/v1/productos?limit=1000");
+  const categoriasRes = useResource<Page<Categoria>>("/api/v1/categorias?limit=200");
   const listas = listasRes.data?.items ?? [];
   const productos = productosRes.data?.items ?? [];
+  const categorias = categoriasRes.data?.items ?? [];
   const prodName = useMemo(
     () => Object.fromEntries(productos.map((p) => [p.id, p.nombre])),
     [productos]
   );
+  const prodById = useMemo(
+    () => Object.fromEntries(productos.map((p) => [p.id, p])) as Record<string, Producto>,
+    [productos]
+  );
 
   // ── editor de lista ──
-  const [listaForm, setListaForm] = useState<{ id?: string; codigo: string; nombre: string; status: string } | null>(null);
+  const [listaForm, setListaForm] = useState<{ id?: string; codigo: string; nombre: string; status: string; copiarDe: string } | null>(null);
 
   async function saveLista() {
     if (!listaForm) return;
@@ -47,11 +66,30 @@ export default function ListasPreciosPage() {
     }
     const body = { codigo: listaForm.codigo.trim(), nombre: listaForm.nombre.trim(), status: listaForm.status };
     try {
-      if (listaForm.id) await patch(`/api/v1/listas-precios/${listaForm.id}`, body);
-      else await post("/api/v1/listas-precios", body);
-      toast.success("Lista guardada");
+      if (listaForm.id) {
+        await patch(`/api/v1/listas-precios/${listaForm.id}`, body);
+        toast.success("Lista guardada");
+        setListaForm(null);
+        listasRes.reload();
+        return;
+      }
+      const created = await post<ListaPrecios>("/api/v1/listas-precios", body);
+      if (listaForm.copiarDe) {
+        try {
+          const res = await post<{ created: number; skipped: number }>(
+            `/api/v1/listas-precios/${created.id}/copiar`,
+            { origen_id: listaForm.copiarDe }
+          );
+          toast.success(`Lista creada (${res.created} precios copiados, ${res.skipped} omitidos)`);
+        } catch (e) {
+          toast.error(e instanceof ApiError ? `Lista creada, pero no se copiaron precios: ${e.message}` : "Lista creada, pero no se copiaron precios");
+        }
+      } else {
+        toast.success("Lista guardada");
+      }
       setListaForm(null);
-      listasRes.reload();
+      await listasRes.reload();
+      await openPrecios(created);
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo guardar");
     }
@@ -61,11 +99,11 @@ export default function ListasPreciosPage() {
   const [activeLista, setActiveLista] = useState<ListaPrecios | null>(null);
   const [precios, setPrecios] = useState<Precio[]>([]);
   const [loadingPrecios, setLoadingPrecios] = useState(false);
-  const [nuevo, setNuevo] = useState({ producto_id: "", presentacion: "KILO", cantidad_minima: "1", precio_unitario: "" });
+  const [nuevo, setNuevo] = useState({ producto_id: "", presentacion: "", cantidad_minima: "1", precio_unitario: "" });
 
   async function openPrecios(lista: ListaPrecios) {
     setActiveLista(lista);
-    setNuevo({ producto_id: "", presentacion: "KILO", cantidad_minima: "1", precio_unitario: "" });
+    setNuevo({ producto_id: "", presentacion: "", cantidad_minima: "1", precio_unitario: "" });
     await loadPrecios(lista.id);
   }
 
@@ -87,18 +125,78 @@ export default function ListasPreciosPage() {
       toast.error("Elige producto y precio");
       return;
     }
+    if (!nuevo.presentacion) {
+      toast.error("Elige una presentación");
+      return;
+    }
     try {
       await post(`/api/v1/listas-precios/${activeLista.id}/precios`, {
         producto_id: nuevo.producto_id,
-        presentacion: nuevo.presentacion.trim() || "KILO",
+        presentacion: nuevo.presentacion,
         cantidad_minima: Number(nuevo.cantidad_minima) || 1,
         precio_unitario: nuevo.precio_unitario,
       });
       toast.success("Precio agregado");
-      setNuevo({ producto_id: "", presentacion: "KILO", cantidad_minima: "1", precio_unitario: "" });
+      setNuevo({ producto_id: "", presentacion: "", cantidad_minima: "1", precio_unitario: "" });
       await loadPrecios(activeLista.id);
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo agregar (¿tier duplicado?)");
+    }
+  }
+
+  // ── cargar productos del catálogo ──
+  type CatalogRow = { producto_id: string; presentacion: string; precio_unitario: string };
+  const [cargarOpen, setCargarOpen] = useState(false);
+  const [cargarCategoria, setCargarCategoria] = useState("");
+  const [cargarRows, setCargarRows] = useState<CatalogRow[]>([]);
+
+  function openCargar() {
+    setCargarCategoria("");
+    rebuildCargarRows("");
+    setCargarOpen(true);
+  }
+
+  function rebuildCargarRows(categoriaId: string) {
+    const filtered = categoriaId
+      ? productos.filter((p) => p.categoria_id === categoriaId)
+      : productos;
+    setCargarRows(
+      filtered.map((p) => ({
+        producto_id: p.id,
+        presentacion: defaultPresentacion(p),
+        precio_unitario: "",
+      }))
+    );
+  }
+
+  function setCargarRow(producto_id: string, patch: Partial<CatalogRow>) {
+    setCargarRows((rows) => rows.map((r) => (r.producto_id === producto_id ? { ...r, ...patch } : r)));
+  }
+
+  async function submitCargar() {
+    if (!activeLista) return;
+    const items = cargarRows
+      .filter((r) => r.precio_unitario.trim() !== "" && r.presentacion)
+      .map((r) => ({
+        producto_id: r.producto_id,
+        presentacion: r.presentacion,
+        precio_unitario: r.precio_unitario,
+        cantidad_minima: 1,
+      }));
+    if (items.length === 0) {
+      toast.error("Captura al menos un precio");
+      return;
+    }
+    try {
+      const res = await post<{ created: number; updated: number }>(
+        `/api/v1/listas-precios/${activeLista.id}/precios/bulk`,
+        { items }
+      );
+      toast.success(`${res.created} agregados, ${res.updated} actualizados`);
+      setCargarOpen(false);
+      await loadPrecios(activeLista.id);
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudieron agregar los precios");
     }
   }
 
@@ -141,7 +239,7 @@ export default function ListasPreciosPage() {
           {canWrite && (
             <>
               <button
-                onClick={(e) => { e.stopPropagation(); setListaForm({ id: l.id, codigo: l.codigo, nombre: l.nombre, status: l.status }); }}
+                onClick={(e) => { e.stopPropagation(); setListaForm({ id: l.id, codigo: l.codigo, nombre: l.nombre, status: l.status, copiarDe: "" }); }}
                 className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-foreground" aria-label="Editar">
                 <Pencil size={16} />
               </button>
@@ -163,7 +261,7 @@ export default function ListasPreciosPage() {
         title="Listas de precios"
         subtitle="Niveles de venta (único, menudeo, mayoreo…) con precios por presentación y volumen."
         actions={canWrite ? (
-          <Button onClick={() => setListaForm({ codigo: "", nombre: "", status: "ACTIVO" })}>
+          <Button onClick={() => setListaForm({ codigo: "", nombre: "", status: "ACTIVO", copiarDe: "" })}>
             <Plus size={16} /> Nueva lista de precios
           </Button>
         ) : undefined}
@@ -205,6 +303,16 @@ export default function ListasPreciosPage() {
                 <option value="INACTIVO">Inactivo</option>
               </Select>
             </Field>
+            {!listaForm.id && (
+              <Field label="Copiar precios de" hint="Opcional: copia todos los precios de una lista existente.">
+                <Select value={listaForm.copiarDe} onChange={(e) => setListaForm({ ...listaForm, copiarDe: e.target.value })}>
+                  <option value="">— No copiar —</option>
+                  {listas
+                    .filter((l) => l.status === "ACTIVO")
+                    .map((l) => <option key={l.id} value={l.id}>{l.codigo} — {l.nombre}</option>)}
+                </Select>
+              </Field>
+            )}
           </div>
         )}
       </Modal>
@@ -218,22 +326,43 @@ export default function ListasPreciosPage() {
         footer={<Button variant="secondary" onClick={() => setActiveLista(null)}>Cerrar</Button>}
       >
         <div className="space-y-4">
-          <p className="text-xs text-muted">
-            Cada renglón es un <b>tier por volumen</b>: el precio aplica a partir de “Desde cant.”. Un solo renglón = precio fijo.
-          </p>
+          <div className="flex items-start justify-between gap-2">
+            <p className="text-xs text-muted">
+              Cada renglón es un <b>tier por volumen</b>: el precio aplica a partir de “Desde cant.”. Un solo renglón = precio fijo.
+            </p>
+            {canWrite && (
+              <Button variant="secondary" onClick={openCargar}>
+                <ListPlus size={14} /> Cargar productos del catálogo
+              </Button>
+            )}
+          </div>
 
           {canWrite && (
             <div className="grid grid-cols-2 items-end gap-2 rounded-lg border border-border p-3 sm:grid-cols-5">
               <div className="col-span-2">
                 <Field label="Producto">
-                  <Select value={nuevo.producto_id} onChange={(e) => setNuevo({ ...nuevo, producto_id: e.target.value })}>
+                  <Select
+                    value={nuevo.producto_id}
+                    onChange={(e) => {
+                      const prod = prodById[e.target.value];
+                      setNuevo({ ...nuevo, producto_id: e.target.value, presentacion: defaultPresentacion(prod) });
+                    }}
+                  >
                     <option value="">— Elige —</option>
                     {productos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
                   </Select>
                 </Field>
               </div>
               <Field label="Present.">
-                <Input value={nuevo.presentacion} onChange={(e) => setNuevo({ ...nuevo, presentacion: e.target.value.toUpperCase() })} />
+                <Select
+                  value={nuevo.presentacion}
+                  onChange={(e) => setNuevo({ ...nuevo, presentacion: e.target.value })}
+                  disabled={!nuevo.producto_id}
+                >
+                  {presentacionOptions(prodById[nuevo.producto_id]).map((k) => (
+                    <option key={k} value={k}>{k}</option>
+                  ))}
+                </Select>
               </Field>
               <Field label="Desde cant.">
                 <Input type="number" min="1" value={nuevo.cantidad_minima} onChange={(e) => setNuevo({ ...nuevo, cantidad_minima: e.target.value })} />
@@ -269,6 +398,70 @@ export default function ListasPreciosPage() {
               empty="Sin precios en esta lista"
             />
           )}
+        </div>
+      </Modal>
+
+      {/* cargar productos del catálogo */}
+      <Modal
+        open={cargarOpen}
+        onClose={() => setCargarOpen(false)}
+        wide
+        title="Cargar productos del catálogo"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setCargarOpen(false)}>Cancelar</Button>
+            <Button onClick={submitCargar} disabled={saving}>{saving ? "Agregando…" : "Agregar a la lista"}</Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <Field label="Categoría" hint="Vacío = todos los productos.">
+            <Select
+              value={cargarCategoria}
+              onChange={(e) => { setCargarCategoria(e.target.value); rebuildCargarRows(e.target.value); }}
+            >
+              <option value="">— Todas —</option>
+              {categorias.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+            </Select>
+          </Field>
+
+          <p className="text-xs text-muted">Captura un precio en los productos que quieras agregar; los renglones vacíos se omiten.</p>
+
+          <div className="max-h-[50vh] overflow-y-auto">
+            <DataTable
+              columns={[
+                { header: "Producto", cell: (r: CatalogRow) => prodName[r.producto_id] ?? r.producto_id },
+                {
+                  header: "Present.",
+                  cell: (r: CatalogRow) => (
+                    <Select
+                      value={r.presentacion}
+                      onChange={(e) => setCargarRow(r.producto_id, { presentacion: e.target.value })}
+                    >
+                      {presentacionOptions(prodById[r.producto_id]).map((k) => (
+                        <option key={k} value={k}>{k}</option>
+                      ))}
+                    </Select>
+                  ),
+                },
+                {
+                  header: "Precio",
+                  className: "w-40",
+                  cell: (r: CatalogRow) => (
+                    <Input
+                      type="number"
+                      step="0.0001"
+                      min="0"
+                      value={r.precio_unitario}
+                      onChange={(e) => setCargarRow(r.producto_id, { precio_unitario: e.target.value })}
+                    />
+                  ),
+                },
+              ]}
+              rows={cargarRows}
+              empty="No hay productos en esta categoría"
+            />
+          </div>
         </div>
       </Modal>
 

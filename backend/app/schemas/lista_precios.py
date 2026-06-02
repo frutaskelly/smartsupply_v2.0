@@ -2,7 +2,7 @@
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -67,3 +67,25 @@ class PrecioOut(ORMModel, PrecioBase):
     id: uuid.UUID
     tenant_id: uuid.UUID
     lista_id: uuid.UUID
+
+
+# ─── bulk / copy operations ──────────────────────────────────────────────────
+class PrecioCopiarRequest(BaseModel):
+    origen_id: uuid.UUID
+
+
+class PrecioBulkItem(BaseModel):
+    producto_id: uuid.UUID
+    presentacion: str = Field(default="KILO", max_length=20)
+    precio_unitario: Decimal = Field(ge=0)
+    cantidad_minima: int = Field(default=1, ge=1)
+
+
+class PrecioBulkRequest(BaseModel):
+    items: List[PrecioBulkItem]
+
+
+class PrecioBulkResult(BaseModel):
+    created: int
+    updated: int
+    skipped: int
