@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { DataTable, type Column } from "@/components/ui/DataTable";
+import { DataTableSmart } from "@/components/ui/DataTableSmart";
 import { Field, Input, Select, Textarea } from "@/components/ui/Field";
 import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -73,15 +74,7 @@ export default function RemisionesPage() {
   const cliName = useMemo(() => Object.fromEntries(clientes.map((c) => [c.id, c.legal_name])), [clientes]);
 
   // lista
-  const [fEstado, setFEstado] = useState("");
-  const [fCliente, setFCliente] = useState("");
-  const listPath = useMemo(() => {
-    const p = new URLSearchParams({ limit: "50" });
-    if (fEstado) p.set("estado", fEstado);
-    if (fCliente) p.set("cliente_id", fCliente);
-    return `/api/v1/remisiones?${p.toString()}`;
-  }, [fEstado, fCliente]);
-  const { data, loading, error, reload } = useResource<Page<Remision>>(listPath);
+  const { data, loading, error, reload } = useResource<Page<Remision>>("/api/v1/remisiones?limit=50");
   const rows = data?.items ?? [];
 
   // modo crear
@@ -113,7 +106,10 @@ export default function RemisionesPage() {
   }, [mode, clienteId, sucursalId, serieOverride]);
 
   const folioPreview = serieResuelta ? `${serieResuelta.codigo}${serieResuelta.folio_actual + 1}` : "—";
-  const totalPreview = lineas.reduce((s, l) => s + (l.importe || 0), 0);
+  const subtotalPreview = lineas.reduce((s, l) => s + (l.importe || 0), 0);
+  const iepsPreview = lineas.reduce((s, l) => s + (l.importe || 0) * Number(prodById[l.producto_id]?.ieps_tasa ?? 0), 0);
+  const ivaPreview = lineas.reduce((s, l) => s + (l.importe || 0) * Number(prodById[l.producto_id]?.iva_tasa ?? 0), 0);
+  const totalPreview = subtotalPreview + iepsPreview + ivaPreview;
 
   // opciones para los comboboxes
   const clienteOpts: ComboOption[] = useMemo(() => clientes.map((c) => ({ value: c.id, label: c.legal_name })), [clientes]);
@@ -348,6 +344,12 @@ export default function RemisionesPage() {
     if (!d) {
       return <div className="flex justify-center py-6"><Spinner /></div>;
     }
+    // Remisión no fiscal (encabezado guarda iva/ieps=0); el desglose se calcula
+    // desde las tasas del producto, consistente con las columnas por línea.
+    const subtotal = d.lineas.reduce((s, l) => s + Number(l.importe), 0);
+    const ieps = d.lineas.reduce((s, l) => s + Number(l.importe) * Number(prodById[l.producto_id]?.ieps_tasa ?? 0), 0);
+    const iva = d.lineas.reduce((s, l) => s + Number(l.importe) * Number(prodById[l.producto_id]?.iva_tasa ?? 0), 0);
+    const total = subtotal + ieps + iva;
     return (
       <div className="rounded-xl border border-border bg-background p-4">
         <div className="mb-3 flex flex-wrap gap-4 text-sm">
@@ -355,24 +357,25 @@ export default function RemisionesPage() {
           <div><span className="text-muted">Fecha:</span> {fmtDate(d.fecha_remision)}</div>
           <div><span className="text-muted">Estado:</span> <Badge tone={ESTADO_TONE[d.estado] ?? "muted"}>{d.estado}</Badge></div>
         </div>
-        <table className="w-full text-sm">
-          <thead><tr className="border-b border-border text-left text-xs text-muted">
-            <th className="py-1">Producto</th><th>Pres.</th><th className="text-right">Cant.</th><th className="text-right">Precio</th><th className="text-right">Importe</th>
-          </tr></thead>
-          <tbody>
-            {d.lineas.map((l) => (
-              <tr key={l.id} className="border-b border-border/50">
-                <td className="py-1">{prodById[l.producto_id]?.nombre ?? l.producto_id}</td>
-                <td>{l.presentacion}</td>
-                <td className="text-right tabular-nums">{fmtNumber(l.cantidad_solicitada)}</td>
-                <td className="text-right tabular-nums">{fmtMoney(l.precio_unitario)}</td>
-                <td className="text-right tabular-nums">{fmtMoney(l.importe)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <div className="mt-3 flex justify-end gap-4 text-sm">
-          <span className="text-muted">Total</span><span className="font-semibold tabular-nums">{fmtMoney(d.total)}</span>
+        <DataTable
+          rows={d.lineas}
+          rowKey={(l) => l.id}
+          empty="Sin líneas"
+          columns={[
+            { header: "Cant.", className: "text-right tabular-nums", cell: (l) => fmtNumber(l.cantidad_solicitada) },
+            { header: "Pres.", cell: (l) => l.presentacion },
+            { header: "Descr.", cell: (l) => l.producto_nombre ?? prodById[l.producto_id]?.nombre ?? l.producto_id },
+            { header: "P/U", className: "text-right tabular-nums", cell: (l) => fmtMoney(l.precio_unitario) },
+            { header: "IEPS", className: "text-right tabular-nums", cell: (l) => fmtMoney(Number(l.importe) * Number(prodById[l.producto_id]?.ieps_tasa ?? 0)) },
+            { header: "IVA", className: "text-right tabular-nums", cell: (l) => fmtMoney(Number(l.importe) * Number(prodById[l.producto_id]?.iva_tasa ?? 0)) },
+            { header: "Importe", className: "text-right tabular-nums", cell: (l) => fmtMoney(l.importe) },
+          ]}
+        />
+        <div className="mt-3 flex flex-col items-end gap-1 text-sm">
+          <div className="flex gap-4"><span className="text-muted">Subtotal</span><span className="tabular-nums">{fmtMoney(subtotal)}</span></div>
+          <div className="flex gap-4"><span className="text-muted">IEPS</span><span className="tabular-nums">{fmtMoney(ieps)}</span></div>
+          <div className="flex gap-4"><span className="text-muted">IVA</span><span className="tabular-nums">{fmtMoney(iva)}</span></div>
+          <div className="flex gap-4 text-base font-semibold"><span className="text-muted">Total</span><span className="tabular-nums">{fmtMoney(total)}</span></div>
         </div>
       </div>
     );
@@ -403,7 +406,11 @@ export default function RemisionesPage() {
     { header: "Cliente", cell: (r) => cliName[r.cliente_facturacion_id] ?? "—" },
     { header: "Fecha", cell: (r) => fmtDate(r.fecha_remision) },
     { header: "Estado", cell: (r) => <Badge tone={ESTADO_TONE[r.estado] ?? "muted"}>{r.estado}</Badge> },
-    { header: "Total", cell: (r) => fmtMoney(r.total), className: "text-right" },
+    { header: "Subtotal", className: "text-right tabular-nums", cell: (r) => fmtMoney(r.subtotal) },
+    { header: "IEPS", className: "text-right tabular-nums", cell: (r) => fmtMoney(r.ieps) },
+    { header: "IVA", className: "text-right tabular-nums", cell: (r) => fmtMoney(r.iva) },
+    { header: "Total", className: "text-right tabular-nums", cell: (r) => fmtMoney(r.total) },
+    { header: "Nota", cell: (r) => r.notas ?? "—" },
     {
       header: "",
       className: "text-right w-1",
@@ -493,19 +500,22 @@ export default function RemisionesPage() {
 
           <div className="space-y-2">
             <div className="hidden grid-cols-12 gap-2 px-1 text-xs text-muted sm:grid">
-              <div className="col-span-5">Producto</div>
-              <div className="col-span-2">Presentación</div>
               <div className="col-span-2">Cantidad</div>
+              <div className="col-span-2">Presentación</div>
+              <div className="col-span-3">Producto</div>
               <div className="col-span-2">Precio</div>
+              <div className="col-span-1 text-right">IEPS</div>
+              <div className="col-span-1 text-right">IVA</div>
               <div className="col-span-1 text-right">Importe</div>
             </div>
             {lineas.map((l) => (
               <div key={l.key} className="grid grid-cols-12 items-start gap-2">
-                <div className="col-span-12 sm:col-span-5">
-                  <ProductoCombobox
-                    label={l.label || l.texto}
-                    onSelect={(p, t) => onPickProducto(l.key, p, t)}
-                    autoFocus={lineFocus?.key === l.key && lineFocus?.field === "producto"}
+                <div className="col-span-3 sm:col-span-2">
+                  <Input
+                    inputMode="decimal" value={l.cantidad}
+                    ref={(el) => { cellRefs.current[`${l.key}:cantidad`] = el; }}
+                    onChange={(e) => { const v = e.target.value.replace(",", "."); setLinea(l.key, { cantidad: v, importe: Number(l.precio || 0) * Number(v || 0) }); cotizar(l.key, l.producto_id, l.presentacion, v); }}
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); advanceLine(l.key, "cantidad"); } }}
                   />
                 </div>
                 <div className="col-span-4 sm:col-span-2">
@@ -518,12 +528,11 @@ export default function RemisionesPage() {
                     placeholder="Presentación"
                   />
                 </div>
-                <div className="col-span-3 sm:col-span-2">
-                  <Input
-                    inputMode="decimal" value={l.cantidad}
-                    ref={(el) => { cellRefs.current[`${l.key}:cantidad`] = el; }}
-                    onChange={(e) => { const v = e.target.value.replace(",", "."); setLinea(l.key, { cantidad: v, importe: Number(l.precio || 0) * Number(v || 0) }); cotizar(l.key, l.producto_id, l.presentacion, v); }}
-                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); advanceLine(l.key, "cantidad"); } }}
+                <div className="col-span-12 sm:col-span-3">
+                  <ProductoCombobox
+                    label={l.label || l.texto}
+                    onSelect={(p, t) => onPickProducto(l.key, p, t)}
+                    autoFocus={lineFocus?.key === l.key && lineFocus?.field === "producto"}
                   />
                 </div>
                 <div className="col-span-3 sm:col-span-2">
@@ -533,6 +542,12 @@ export default function RemisionesPage() {
                     onChange={(e) => { const v = e.target.value.replace(",", "."); setLinea(l.key, { precio: v, precioManual: true, importe: Number(v || 0) * Number(l.cantidad || 0) }); }}
                     onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); advanceLine(l.key, "precio"); } }}
                   />
+                </div>
+                <div className="col-span-2 flex items-center justify-end sm:col-span-1">
+                  <span className="text-sm tabular-nums">{fmtMoney((l.importe || 0) * Number(prodById[l.producto_id]?.ieps_tasa ?? 0))}</span>
+                </div>
+                <div className="col-span-2 flex items-center justify-end sm:col-span-1">
+                  <span className="text-sm tabular-nums">{fmtMoney((l.importe || 0) * Number(prodById[l.producto_id]?.iva_tasa ?? 0))}</span>
                 </div>
                 <div className="col-span-2 flex items-center justify-end gap-1 sm:col-span-1">
                   <span className="text-sm tabular-nums">{fmtMoney(l.importe)}</span>
@@ -546,10 +561,15 @@ export default function RemisionesPage() {
             <Textarea rows={2} value={notas} onChange={(e) => setNotas(e.target.value)} />
           </Field>
 
-          <div className="mt-4 flex items-center justify-between border-t border-border pt-4">
-            <span className="text-sm text-muted">Total estimado</span>
-            <div className="flex items-center gap-4">
-              <span className="text-lg font-semibold tabular-nums">{fmtMoney(totalPreview)}</span>
+          <div className="mt-4 flex items-start justify-between border-t border-border pt-4">
+            <div />
+            <div className="flex flex-col items-end gap-4">
+              <div className="flex flex-col items-end gap-1 text-sm">
+                <div className="flex gap-4"><span className="text-muted">Subtotal</span><span className="tabular-nums">{fmtMoney(subtotalPreview)}</span></div>
+                <div className="flex gap-4"><span className="text-muted">IEPS</span><span className="tabular-nums">{fmtMoney(iepsPreview)}</span></div>
+                <div className="flex gap-4"><span className="text-muted">IVA</span><span className="tabular-nums">{fmtMoney(ivaPreview)}</span></div>
+                <div className="flex gap-4 text-base font-semibold"><span className="text-muted">Total</span><span className="tabular-nums">{fmtMoney(totalPreview)}</span></div>
+              </div>
               <Button onClick={guardar} disabled={saving}>{saving ? "Guardando…" : "Guardar borrador"}</Button>
             </div>
           </div>
@@ -572,20 +592,7 @@ export default function RemisionesPage() {
         actions={canWrite ? <Button onClick={openCreate}><Plus size={16} /> Nueva remisión</Button> : undefined}
       />
 
-      <div className="mb-4 flex flex-wrap gap-2">
-        <Select value={fEstado} onChange={(e) => setFEstado(e.target.value)} className="max-w-[10rem]">
-          <option value="">Todos los estados</option>
-          <option value="BORRADOR">Borrador</option>
-          <option value="CONFIRMADA">Confirmada</option>
-          <option value="CANCELADA">Cancelada</option>
-        </Select>
-        <Select value={fCliente} onChange={(e) => setFCliente(e.target.value)} className="max-w-xs">
-          <option value="">Todos los clientes</option>
-          {clientes.map((c) => <option key={c.id} value={c.id}>{c.legal_name}</option>)}
-        </Select>
-      </div>
-
-      <DataTable
+      <DataTableSmart
         columns={columns}
         rows={rows}
         loading={loading}
@@ -594,6 +601,7 @@ export default function RemisionesPage() {
         rowKey={(r) => r.id}
         onRowExpand={verDetalle}
         renderExpanded={renderDetalle}
+        storageKey="remisiones"
       />
 
       <ConfirmDialog open={toConfirm !== null} title="Confirmar remisión"

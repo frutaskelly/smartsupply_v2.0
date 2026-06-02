@@ -25,6 +25,7 @@ class LineaRemisionOut(ORMModel):
     id: uuid.UUID
     numero_linea: int
     producto_id: uuid.UUID
+    producto_nombre: Optional[str] = None
     presentacion: str
     cantidad_solicitada: Decimal
     cantidad_surtida: Optional[Decimal] = None

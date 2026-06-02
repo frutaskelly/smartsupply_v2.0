@@ -195,6 +195,7 @@ export type LineaRemision = {
   id: string;
   numero_linea: number;
   producto_id: string;
+  producto_nombre?: string | null;
   presentacion: string;
   cantidad_solicitada: string;
   cantidad_surtida?: string | null;

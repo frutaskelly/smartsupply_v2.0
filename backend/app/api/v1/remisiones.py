@@ -182,7 +182,12 @@ def get_remision(
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
-    return get_or_404(db, Remision, rem_id)
+    rem = get_or_404(db, Remision, rem_id)
+    prod_ids = {ln.producto_id for ln in rem.lineas}
+    names = dict(db.query(Producto.id, Producto.nombre).filter(Producto.id.in_(prod_ids)).all())
+    for ln in rem.lineas:
+        ln.producto_nombre = names.get(ln.producto_id)
+    return rem
 
 
 @router.patch("/{rem_id}", response_model=RemisionDetailOut)
