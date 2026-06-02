@@ -81,6 +81,27 @@ export default function RemisionesPage() {
   const { data, loading, error, reload } = useResource<Page<Remision>>("/api/v1/remisiones?limit=50");
   const rows = data?.items ?? [];
 
+  // ── filtros de lista (cliente-side) ──
+  const [fDesde, setFDesde] = useState("");
+  const [fHasta, setFHasta] = useState("");
+  const [fCliente, setFCliente] = useState("");
+  const filteredRows = useMemo(
+    () =>
+      rows.filter((r) => {
+        const fch = (r.fecha_remision ?? "").slice(0, 10);
+        if (fDesde && fch < fDesde) return false;
+        if (fHasta && fch > fHasta) return false;
+        if (fCliente && r.cliente_facturacion_id !== fCliente) return false;
+        return true;
+      }),
+    [rows, fDesde, fHasta, fCliente],
+  );
+
+  // ── selección de filas (acciones en lote) ──
+  const [selected, setSelected] = useState<Remision[]>([]);
+  const [selectionResetKey, setSelectionResetKey] = useState(0);
+  const clearSelection = () => { setSelected([]); setSelectionResetKey((k) => k + 1); };
+
   // modo crear
   const [mode, setMode] = useState<"list" | "create">("list");
   const [clienteId, setClienteId] = useState("");
@@ -411,17 +432,20 @@ export default function RemisionesPage() {
     }
   }
 
-  // Imprime la remisión en una ventana (vista imprimible).
-  async function imprimirRemision(r: Remision) {
-    let d = detalles[r.id];
-    if (!d) {
-      try {
-        d = await apiFetch<RemisionDetail>(`/api/v1/remisiones/${r.id}`);
-        setDetalles((m) => ({ ...m, [r.id]: d! }));
-      } catch {
-        toast.error("No se pudo cargar la remisión"); return;
-      }
+  // Carga el detalle de una remisión (usa caché `detalles` si está disponible).
+  async function getDetalle(r: Remision): Promise<RemisionDetail | null> {
+    if (detalles[r.id]) return detalles[r.id];
+    try {
+      const d = await apiFetch<RemisionDetail>(`/api/v1/remisiones/${r.id}`);
+      setDetalles((m) => ({ ...m, [r.id]: d }));
+      return d;
+    } catch {
+      return null;
     }
+  }
+
+  // Construye el HTML imprimible de UNA remisión (una sección por remisión).
+  function buildRemisionSection(d: RemisionDetail): string {
     const total = d.lineas.reduce((s, l) => s + Number(l.importe), 0);
     const filas = d.lineas.map((l) =>
       `<tr><td>${l.producto_nombre ?? prodById[l.producto_id]?.nombre ?? l.producto_id}</td>`
@@ -429,20 +453,44 @@ export default function RemisionesPage() {
       + `<td style="text-align:right">${fmtNumber(l.cantidad_solicitada)}</td>`
       + `<td style="text-align:right">${fmtMoney(l.precio_unitario)}</td>`
       + `<td style="text-align:right">${fmtMoney(l.importe)}</td></tr>`).join("");
-    const win = window.open("", "_blank", "width=820,height=640");
-    if (!win) { toast.error("Permite ventanas emergentes para imprimir"); return; }
-    win.document.write(
-      `<!doctype html><html><head><meta charset="utf-8"><title>Remisión ${r.folio_interno}</title>`
-      + `<style>body{font-family:system-ui,Arial,sans-serif;padding:24px;color:#111}h1{font-size:18px;margin:0 0 4px}`
-      + `table{width:100%;border-collapse:collapse;margin-top:12px;font-size:13px}th,td{border-bottom:1px solid #ddd;padding:6px 8px;text-align:left}`
-      + `th{background:#f4f4f5}tfoot td{font-weight:600}</style></head><body>`
-      + `<h1>Remisión ${r.folio_interno}</h1>`
+    return (
+      `<h1>Remisión ${d.folio_interno}</h1>`
       + `<div>Cliente: ${cliName[d.cliente_facturacion_id] ?? "—"} &middot; Fecha: ${fmtDate(d.fecha_remision)} &middot; Estado: ${d.estado}</div>`
       + `<table><thead><tr><th>Producto</th><th>Pres.</th><th style="text-align:right">Cant.</th><th style="text-align:right">Precio</th><th style="text-align:right">Importe</th></tr></thead>`
       + `<tbody>${filas}</tbody>`
       + `<tfoot><tr><td colspan="4" style="text-align:right">Total</td><td style="text-align:right">${fmtMoney(total)}</td></tr></tfoot></table>`
+    );
+  }
+
+  // Abre UNA ventana de impresión con una sección por remisión (salto de página
+  // entre cada una) y dispara la impresión.
+  async function printRemisiones(list: Remision[]) {
+    if (list.length === 0) return;
+    const dets = (await Promise.all(list.map((r) => getDetalle(r)))).filter(
+      (d): d is RemisionDetail => d != null,
+    );
+    if (dets.length === 0) { toast.error("No se pudo cargar la(s) remisión(es)"); return; }
+    const win = window.open("", "_blank", "width=820,height=640");
+    if (!win) { toast.error("Permite ventanas emergentes para imprimir"); return; }
+    const secciones = dets
+      .map((d, i) => {
+        const section = buildRemisionSection(d);
+        return i < dets.length - 1 ? `<div style="page-break-after:always">${section}</div>` : `<div>${section}</div>`;
+      })
+      .join("");
+    win.document.write(
+      `<!doctype html><html><head><meta charset="utf-8"><title>Remisiones</title>`
+      + `<style>body{font-family:system-ui,Arial,sans-serif;padding:24px;color:#111}h1{font-size:18px;margin:0 0 4px}`
+      + `table{width:100%;border-collapse:collapse;margin-top:12px;font-size:13px}th,td{border-bottom:1px solid #ddd;padding:6px 8px;text-align:left}`
+      + `th{background:#f4f4f5}tfoot td{font-weight:600}</style></head><body>`
+      + secciones
       + `</body></html>`);
     win.document.close(); win.focus(); win.print();
+  }
+
+  // Imprime una sola remisión (vista imprimible).
+  async function imprimirRemision(r: Remision) {
+    await printRemisiones([r]);
   }
 
   // ── enviar por correo ──
@@ -476,11 +524,82 @@ export default function RemisionesPage() {
     }
   }
 
+  // ── acciones en lote sobre las remisiones seleccionadas ──
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [facturarOpen, setFacturarOpen] = useState(false);
+
+  // Imprimir todas las seleccionadas en una sola ventana.
+  async function bulkImprimir() {
+    await printRemisiones(selected);
+  }
+
+  // Enviar por correo cada seleccionada (destinatario por defecto en backend).
+  async function bulkEnviar() {
+    if (selected.length === 0) return;
+    setBulkBusy(true);
+    try {
+      const results = await Promise.allSettled(
+        selected.map((r) => apiFetch(`/api/v1/remisiones/${r.id}/enviar`, { method: "POST", body: JSON.stringify({}) })),
+      );
+      const ok = results.filter((x) => x.status === "fulfilled").length;
+      const fail = results.length - ok;
+      toast[fail === 0 ? "success" : "error"](`Enviadas ${ok} de ${selected.length}${fail ? ` (${fail} fallidas)` : ""}`);
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  // Facturar las seleccionadas. `modo`:
+  //  - "acumulado": una factura por cliente (agrupa por cliente_facturacion_id)
+  //  - "separado":  una factura por remisión
+  // Solo elegibles: CONFIRMADA y sin factura_id. El resto se omite.
+  async function bulkFacturar(modo: "acumulado" | "separado") {
+    const elegibles = selected.filter((r) => r.estado === "CONFIRMADA" && !r.factura_id);
+    const omitidas = selected.length - elegibles.length;
+    if (elegibles.length === 0) {
+      toast.error(`Ninguna remisión elegible (se omitieron ${omitidas} no confirmadas o ya facturadas)`);
+      setFacturarOpen(false);
+      return;
+    }
+    // grupos de ids según el modo
+    let grupos: string[][];
+    if (modo === "acumulado") {
+      const byCliente = new Map<string, string[]>();
+      for (const r of elegibles) {
+        const arr = byCliente.get(r.cliente_facturacion_id) ?? [];
+        arr.push(r.id);
+        byCliente.set(r.cliente_facturacion_id, arr);
+      }
+      grupos = [...byCliente.values()];
+    } else {
+      grupos = elegibles.map((r) => [r.id]);
+    }
+    setBulkBusy(true);
+    try {
+      const results = await Promise.allSettled(
+        grupos.map((remision_ids) =>
+          post("/api/v1/facturas/desde-remisiones", { remision_ids }),
+        ),
+      );
+      const creadas = results.filter((x) => x.status === "fulfilled").length;
+      const fallidas = results.length - creadas;
+      const partes = [`Facturas creadas: ${creadas}`];
+      if (fallidas) partes.push(`${fallidas} fallidas`);
+      if (omitidas) partes.push(`${omitidas} omitidas`);
+      toast[fallidas === 0 ? "success" : "error"](partes.join(" · "));
+      setFacturarOpen(false);
+      clearSelection();
+      reload();
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
   const columns: Column<Remision>[] = [
-    { header: "Folio", cell: (r) => <span className="font-medium">{r.folio_interno}</span> },
-    { header: "Cliente", cell: (r) => cliName[r.cliente_facturacion_id] ?? "—" },
-    { header: "Fecha", cell: (r) => fmtDate(r.fecha_remision) },
-    { header: "Estado", cell: (r) => <Badge tone={ESTADO_TONE[r.estado] ?? "muted"}>{r.estado}</Badge> },
+    { header: "Folio", sortable: true, sortValue: (r) => r.folio_interno, cell: (r) => <span className="font-medium">{r.folio_interno}</span> },
+    { header: "Cliente", sortable: true, sortValue: (r) => cliName[r.cliente_facturacion_id] ?? "", cell: (r) => cliName[r.cliente_facturacion_id] ?? "—" },
+    { header: "Fecha", sortable: true, sortValue: (r) => r.fecha_remision, cell: (r) => fmtDate(r.fecha_remision) },
+    { header: "Estado", sortable: true, sortValue: (r) => r.estado, cell: (r) => <Badge tone={ESTADO_TONE[r.estado] ?? "muted"}>{r.estado}</Badge> },
     { header: "Subtotal", className: "text-right tabular-nums", cell: (r) => fmtMoney(r.subtotal) },
     { header: "IEPS", className: "text-right tabular-nums", cell: (r) => fmtMoney(r.ieps) },
     { header: "IVA", className: "text-right tabular-nums", cell: (r) => fmtMoney(r.iva) },
@@ -666,9 +785,62 @@ export default function RemisionesPage() {
         actions={canWrite ? <Button onClick={openCreate}><Plus size={16} /> Nueva remisión</Button> : undefined}
       />
 
+      {/* Filtros */}
+      <div className="mb-3 flex flex-wrap items-end gap-3">
+        <Field label="Desde">
+          <Input type="date" value={fDesde} onChange={(e) => setFDesde(e.target.value)} />
+        </Field>
+        <Field label="Hasta">
+          <Input type="date" value={fHasta} onChange={(e) => setFHasta(e.target.value)} />
+        </Field>
+        <Field label="Cliente">
+          <Select value={fCliente} onChange={(e) => setFCliente(e.target.value)} aria-label="Filtrar por cliente">
+            <option value="">Todos</option>
+            {clientes.map((c) => (
+              <option key={c.id} value={c.id}>{c.legal_name}</option>
+            ))}
+          </Select>
+        </Field>
+        {(fDesde || fHasta || fCliente) && (
+          <Button variant="secondary" onClick={() => { setFDesde(""); setFHasta(""); setFCliente(""); }}>
+            Limpiar filtros
+          </Button>
+        )}
+      </div>
+
+      {/* Barra de acciones en lote */}
+      {selected.length > 0 && (
+        <div className="sticky top-2 z-10 mb-3 flex flex-wrap items-center gap-3 rounded-xl border border-border bg-surface-2 px-4 py-2.5 shadow-sm">
+          <span className="text-sm font-medium">{selected.length} seleccionada(s)</span>
+          <span className="text-sm text-muted">·</span>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="secondary" onClick={() => { void bulkImprimir(); }} disabled={bulkBusy}>
+              <Printer size={16} /> Imprimir ({selected.length})
+            </Button>
+            {canWrite && (
+              <Button variant="secondary" onClick={() => { void bulkEnviar(); }} disabled={bulkBusy}>
+                <Mail size={16} /> Enviar por correo ({selected.length})
+              </Button>
+            )}
+            {canWrite && (
+              <Button onClick={() => setFacturarOpen(true)} disabled={bulkBusy}>
+                <FileText size={16} /> Facturar ({selected.length})
+              </Button>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={clearSelection}
+            className="ml-auto text-sm text-muted hover:text-foreground"
+          >
+            Limpiar selección
+          </button>
+        </div>
+      )}
+
       <DataTableSmart
         columns={columns}
-        rows={rows}
+        rows={filteredRows}
         loading={loading}
         error={error}
         empty="Sin remisiones"
@@ -677,6 +849,9 @@ export default function RemisionesPage() {
         onRowExpand={verDetalle}
         renderExpanded={renderDetalle}
         storageKey="remisiones"
+        selectable
+        onSelectionChange={setSelected}
+        selectionResetKey={selectionResetKey}
       />
 
       <ConfirmDialog open={toConfirm !== null} title="Confirmar remisión"
@@ -710,6 +885,31 @@ export default function RemisionesPage() {
             onChange={(e) => setSendTo(e.target.value)}
           />
         </Field>
+      </Modal>
+
+      <Modal
+        open={facturarOpen}
+        onClose={() => setFacturarOpen(false)}
+        title={`Facturar ${selected.length} remisión(es)`}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setFacturarOpen(false)} disabled={bulkBusy}>Cancelar</Button>
+            <Button variant="secondary" onClick={() => { void bulkFacturar("separado"); }} disabled={bulkBusy}>
+              Separado
+            </Button>
+            <Button onClick={() => { void bulkFacturar("acumulado"); }} disabled={bulkBusy}>
+              Acumulado
+            </Button>
+          </>
+        }
+      >
+        <p className="mb-2 text-sm text-muted">
+          Solo se facturan las remisiones <strong>confirmadas</strong> y sin factura previa; el resto se omite.
+        </p>
+        <ul className="ml-4 list-disc text-sm text-muted">
+          <li><strong>Acumulado</strong>: una factura por cliente (agrupa las remisiones de cada cliente).</li>
+          <li><strong>Separado</strong>: una factura por cada remisión.</li>
+        </ul>
       </Modal>
     </div>
   );
