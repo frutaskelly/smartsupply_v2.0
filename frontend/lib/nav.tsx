@@ -1,6 +1,7 @@
 import {
   Boxes,
   Building2,
+  Calculator,
   FileText,
   FolderTree,
   Hash,
@@ -39,6 +40,7 @@ export const NAV: NavSection[] = [
       { label: "Clientes", href: "/clientes", perm: "menu:clientes", icon: Users },
       { label: "Sucursales y precios", href: "/sucursales", perm: "menu:clientes", icon: Building2 },
       { label: "Listas de precios", href: "/listas-precios", perm: "menu:listas_precios", icon: Tag },
+      { label: "Cotizador", href: "/cotizador", perm: "menu:listas_precios", icon: Calculator },
     ],
   },
   {
