@@ -219,6 +219,45 @@ def test_tomador_cannot_touch_compras(client, env, auth_as):
     assert _make_oc(client, h, env).status_code == 403
 
 
+def test_resumen_en_transito_reflects_open_oc(client, env, auth_as):
+    auth_as(env["admin_a"]); h = _hdr(env["admin_a"])
+
+    def _resumen():
+        return client.get("/api/v1/inventario/resumen", headers=h,
+                          params={"producto_id": env["prod_a"]}).json()
+
+    # No stock and no open OC yet.
+    r0 = _resumen()
+    assert float(r0["disponible"]) == 0.0
+    assert float(r0["en_transito"]) == 0.0
+
+    # BORRADOR does not count as in-transit.
+    oc_id = _make_oc(client, h, env, qty="100", precio="8").json()["id"]
+    assert float(_resumen()["en_transito"]) == 0.0
+
+    # Move it to an open state → full requested qty is in-transit.
+    for nuevo in ("ENVIADA", "ACEPTADA", "EN_TRANSITO"):
+        client.post(f"/api/v1/ordenes-compra/{oc_id}/transition", headers=h,
+                    json={"nuevo_estado": nuevo})
+    assert float(_resumen()["en_transito"]) == 100.0
+
+    # Partial receive: stock rises, in-transit drops by the received qty.
+    linea_id = client.get(f"/api/v1/ordenes-compra/{oc_id}", headers=h).json()["lineas"][0]["id"]
+    part = client.post(f"/api/v1/ordenes-compra/{oc_id}/recibir", headers=h,
+                       json={"recepciones": [{"linea_id": linea_id, "cantidad": "40"}]})
+    assert part.json()["estado"] == "RECIBIDA_PARCIAL"
+    r1 = _resumen()
+    assert float(r1["disponible"]) == 40.0
+    assert float(r1["en_transito"]) == 60.0  # 100 − 40 still pending
+
+    # Receiving the rest closes the OC → nothing in transit.
+    client.post(f"/api/v1/ordenes-compra/{oc_id}/recibir", headers=h,
+                json={"recepciones": [{"linea_id": linea_id, "cantidad": "60"}]})
+    r2 = _resumen()
+    assert float(r2["disponible"]) == 100.0
+    assert float(r2["en_transito"]) == 0.0
+
+
 def test_oc_isolated_between_tenants(client, env, auth_as):
     auth_as(env["admin_a"]); ha = _hdr(env["admin_a"])
     oc_id = _make_oc(client, ha, env).json()["id"]

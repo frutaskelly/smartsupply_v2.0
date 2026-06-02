@@ -89,3 +89,10 @@ class ExistenciaRow(BaseModel):
     reservada: Decimal
     costo_promedio: Decimal
     valor: Decimal
+
+
+class ResumenProductoOut(BaseModel):
+    """Per-product inventory summary: current stock + qty pending on open POs."""
+    producto_id: uuid.UUID
+    disponible: Decimal
+    en_transito: Decimal

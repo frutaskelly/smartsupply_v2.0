@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Eye, PackageCheck, Plus, ShoppingCart, Trash2 } from "lucide-react";
 
+import { ProductoCombobox } from "@/components/ProductoCombobox";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -14,9 +15,11 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { useToast } from "@/components/ui/Toast";
 import { ApiError, apiFetch } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
-import { fmtDate, fmtMoney } from "@/lib/format";
+import { fmtDate, fmtMoney, fmtNumber } from "@/lib/format";
 import { useMutation, useResource, type Page } from "@/lib/hooks";
 import type { Almacen, OrdenCompra, Producto, Proveedor } from "@/lib/types";
+
+type ResumenProducto = { producto_id: string; disponible: number | string; en_transito: number | string };
 
 const WRITE = "compra:gestionar";
 const BASE = "/api/v1/ordenes-compra";
@@ -74,6 +77,20 @@ export default function ComprasPage() {
   }
   const presentacionDefault = (productoId: string) => presentaciones(productoId)[0] ?? "";
 
+  // ── resumen de inventario (Actual / Tránsito) cacheado por producto_id ──
+  // null = petición en curso; objeto = resultado. La clave presente evita refetch.
+  const [resumen, setResumen] = useState<Record<string, ResumenProducto | null>>({});
+  const ensureResumen = useCallback((productoId: string) => {
+    if (!productoId) return;
+    setResumen((prev) => {
+      if (productoId in prev) return prev;
+      apiFetch<ResumenProducto>(`/api/v1/inventario/resumen?producto_id=${productoId}`)
+        .then((r) => setResumen((p) => ({ ...p, [productoId]: r })))
+        .catch(() => { /* sin resumen no bloquea la captura */ });
+      return { ...prev, [productoId]: null };
+    });
+  }, []);
+
   // ── alta ──
   const [creating, setCreating] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -126,6 +143,11 @@ export default function ComprasPage() {
   // ── detalle / acciones ──
   const [detail, setDetail] = useState<OrdenCompra | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // Al abrir el detalle, carga el resumen de cada producto distinto de la orden.
+  useEffect(() => {
+    for (const l of detail?.lineas ?? []) ensureResumen(l.producto_id);
+  }, [detail, ensureResumen]);
   const [confirmRecibir, setConfirmRecibir] = useState(false);
   async function openDetail(id: string) {
     try {
@@ -234,34 +256,53 @@ export default function ComprasPage() {
             <Button variant="secondary" onClick={addLinea}><Plus size={14} /> Agregar renglón</Button>
           </div>
           <div className="space-y-2">
-            {lineas.map((l, i) => (
-              <div key={i} className="grid grid-cols-12 items-end gap-2">
-                <div className="col-span-5">
-                  {i === 0 && <span className="mb-1 block text-xs text-muted">Producto</span>}
-                  <Select value={l.producto_id} onChange={(e) => setLinea(i, { producto_id: e.target.value, presentacion: presentacionDefault(e.target.value) })}>
-                    <option value="">— Elige —</option>
-                    {productos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
-                  </Select>
+            {lineas.map((l, i) => {
+              const r = l.producto_id ? resumen[l.producto_id] : undefined;
+              return (
+              <div key={i}>
+                <div className="grid grid-cols-12 items-end gap-2">
+                  <div className="col-span-5">
+                    {i === 0 && <span className="mb-1 block text-xs text-muted">Producto</span>}
+                    <ProductoCombobox
+                      label={l.producto_id ? prodName[l.producto_id] ?? "" : ""}
+                      onSelect={(p) => {
+                        if (p) {
+                          setLinea(i, { producto_id: p.producto_id, presentacion: presentacionDefault(p.producto_id) });
+                          ensureResumen(p.producto_id);
+                        } else {
+                          setLinea(i, { producto_id: "", presentacion: "" });
+                        }
+                      }}
+                    />
+                  </div>
+                  <div className="col-span-2">
+                    {i === 0 && <span className="mb-1 block text-xs text-muted">Present.</span>}
+                    <Select value={l.presentacion} onChange={(e) => setLinea(i, { presentacion: e.target.value })} disabled={!l.producto_id}>
+                      {presentaciones(l.producto_id).map((pr) => <option key={pr} value={pr}>{pr}</option>)}
+                    </Select>
+                  </div>
+                  <div className="col-span-2">
+                    {i === 0 && <span className="mb-1 block text-xs text-muted">Cantidad</span>}
+                    <Input type="number" step="0.0001" value={l.cantidad} onChange={(e) => setLinea(i, { cantidad: e.target.value })} />
+                  </div>
+                  <div className="col-span-2">
+                    {i === 0 && <span className="mb-1 block text-xs text-muted">Costo unit.</span>}
+                    <Input type="number" step="0.0001" value={l.precio} onChange={(e) => setLinea(i, { precio: e.target.value })} />
+                  </div>
+                  <div className="col-span-1 flex justify-end">
+                    <button onClick={() => removeLinea(i)} aria-label="Quitar" className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-danger"><Trash2 size={16} /></button>
+                  </div>
                 </div>
-                <div className="col-span-2">
-                  {i === 0 && <span className="mb-1 block text-xs text-muted">Present.</span>}
-                  <Select value={l.presentacion} onChange={(e) => setLinea(i, { presentacion: e.target.value })} disabled={!l.producto_id}>
-                    {presentaciones(l.producto_id).map((pr) => <option key={pr} value={pr}>{pr}</option>)}
-                  </Select>
-                </div>
-                <div className="col-span-2">
-                  {i === 0 && <span className="mb-1 block text-xs text-muted">Cantidad</span>}
-                  <Input type="number" step="0.0001" value={l.cantidad} onChange={(e) => setLinea(i, { cantidad: e.target.value })} />
-                </div>
-                <div className="col-span-2">
-                  {i === 0 && <span className="mb-1 block text-xs text-muted">Costo unit.</span>}
-                  <Input type="number" step="0.0001" value={l.precio} onChange={(e) => setLinea(i, { precio: e.target.value })} />
-                </div>
-                <div className="col-span-1 flex justify-end">
-                  <button onClick={() => removeLinea(i)} aria-label="Quitar" className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-danger"><Trash2 size={16} /></button>
-                </div>
+                {l.producto_id && (
+                  <div className="mt-0.5 pl-1 text-xs text-muted tabular-nums">
+                    {r === undefined || r === null
+                      ? "Actual: … · Tránsito: …"
+                      : `Actual: ${fmtNumber(r.disponible)} · Tránsito: ${fmtNumber(r.en_transito)}`}
+                  </div>
+                )}
               </div>
-            ))}
+              );
+            })}
           </div>
           <div className="mt-3 flex justify-end text-sm">
             <span className="text-muted">Subtotal estimado:&nbsp;</span><b>{fmtMoney(subtotal)}</b>
@@ -318,6 +359,8 @@ export default function ComprasPage() {
                 { header: "Present.", cell: (l) => l.presentacion ?? "—" },
                 { header: "Solicitado", className: "text-right tabular-nums", cell: (l) => Number(l.cantidad_solicitada) },
                 { header: "Recibido", className: "text-right tabular-nums", cell: (l) => Number(l.cantidad_recibida) },
+                { header: "Actual", className: "text-right tabular-nums", cell: (l) => { const r = resumen[l.producto_id]; return r ? fmtNumber(r.disponible) : "…"; } },
+                { header: "Tránsito", className: "text-right tabular-nums", cell: (l) => { const r = resumen[l.producto_id]; return r ? fmtNumber(r.en_transito) : "…"; } },
                 { header: "Costo", className: "text-right tabular-nums", cell: (l) => fmtMoney(l.precio_unitario) },
                 { header: "Importe", className: "text-right tabular-nums", cell: (l) => fmtMoney(l.importe) },
               ]}

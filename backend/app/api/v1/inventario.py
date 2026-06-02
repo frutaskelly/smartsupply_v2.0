@@ -24,9 +24,23 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ...core.rbac import AuthContext, get_tenant_db, require_permission
-from ...models import Almacen, LoteInventario, Merma, MovimientoInventario, Producto
+from ...models import (
+    Almacen,
+    LineaOrdenCompra,
+    LoteInventario,
+    Merma,
+    MovimientoInventario,
+    OrdenCompra,
+    Producto,
+)
 from ...schemas.common import Page
-from ...schemas.inventario import ExistenciaRow, LoteOut, MovimientoCreate, MovimientoOut
+from ...schemas.inventario import (
+    ExistenciaRow,
+    LoteOut,
+    MovimientoCreate,
+    MovimientoOut,
+    ResumenProductoOut,
+)
 from ...services.inventario import (
     apply_entrada_compra,
     build_movimiento,
@@ -41,6 +55,9 @@ _READ = "menu:inventario"
 _WRITE = "inventario:gestionar"
 _ZERO = Decimal("0")
 _Q = Decimal("0.0001")
+
+# OCs that still expect goods to arrive (NOT BORRADOR / RECIBIDA / CANCELADA).
+_OC_ABIERTAS = ("ENVIADA", "ACEPTADA", "EN_TRANSITO", "RECIBIDA_PARCIAL")
 
 
 # ─── existencias (aggregated view) ───────────────────────────────────────────
@@ -96,6 +113,57 @@ def existencias(
             )
         )
     return out
+
+
+@router.get("/resumen", response_model=ResumenProductoOut | list[ResumenProductoOut])
+def resumen(
+    producto_id: Optional[UUID] = Query(default=None),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """Per-product summary: `disponible` (current stock) and `en_transito`
+    (pending qty across open purchase orders). With `producto_id`, returns one
+    object; otherwise a list for every product that has stock or in-transit qty."""
+    # disponible per producto (same source as /existencias).
+    disp_q = db.query(
+        LoteInventario.producto_id.label("producto_id"),
+        func.coalesce(func.sum(LoteInventario.cantidad_disponible), 0).label("disponible"),
+    )
+    if producto_id is not None:
+        disp_q = disp_q.filter(LoteInventario.producto_id == producto_id)
+    disp_q = disp_q.group_by(LoteInventario.producto_id)
+
+    # en_transito = Σ(solicitada − recibida) over open OCs' lines.
+    pendiente = func.coalesce(
+        func.sum(LineaOrdenCompra.cantidad_solicitada - LineaOrdenCompra.cantidad_recibida), 0
+    )
+    trans_q = (
+        db.query(LineaOrdenCompra.producto_id.label("producto_id"), pendiente.label("en_transito"))
+        .join(OrdenCompra, OrdenCompra.id == LineaOrdenCompra.orden_compra_id)
+        .filter(OrdenCompra.estado.in_(_OC_ABIERTAS))
+    )
+    if producto_id is not None:
+        trans_q = trans_q.filter(LineaOrdenCompra.producto_id == producto_id)
+    trans_q = trans_q.group_by(LineaOrdenCompra.producto_id)
+
+    disp = {row.producto_id: Decimal(row.disponible) for row in disp_q.all()}
+    trans = {row.producto_id: Decimal(row.en_transito) for row in trans_q.all()}
+
+    if producto_id is not None:
+        return ResumenProductoOut(
+            producto_id=producto_id,
+            disponible=disp.get(producto_id, _ZERO),
+            en_transito=trans.get(producto_id, _ZERO),
+        )
+
+    return [
+        ResumenProductoOut(
+            producto_id=pid,
+            disponible=disp.get(pid, _ZERO),
+            en_transito=trans.get(pid, _ZERO),
+        )
+        for pid in (disp.keys() | trans.keys())
+    ]
 
 
 @router.get("/lotes", response_model=Page[LoteOut])
