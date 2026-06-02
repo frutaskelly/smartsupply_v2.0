@@ -177,16 +177,20 @@ export function DataTable<T>({
   const expandable = !!renderExpanded;
   const [expanded, setExpanded] = useState<Set<string | number>>(new Set());
   function toggleExpand(key: string | number, row: T) {
+    const willExpand = !expanded.has(key);
     setExpanded((prev) => {
       const next = new Set(prev);
       if (next.has(key)) {
         next.delete(key);
       } else {
         next.add(key);
-        onRowExpand?.(row);
       }
       return next;
     });
+    // side effect fuera del updater: llamarlo dentro provoca un setState del
+    // padre durante el render de DataTable (warning "Cannot update a component
+    // while rendering a different component").
+    if (willExpand) onRowExpand?.(row);
   }
 
   // ── columna de acciones (íconos por fila + menú ⋮ para reordenar/ocultar) ──
