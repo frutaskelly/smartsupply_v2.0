@@ -106,6 +106,20 @@ class FacturamaClient:
                 raise FacturamaError(f"cancel_cfdi failed: {r.status_code} {r.text}")
             return r.json() if r.text else {}
 
+    # ─── Validación de RFC en el SAT ──────────────────────────────────────
+    def validar_rfc(self, rfc: str) -> dict:
+        """Consulta el estado de un RFC en el SAT vía Facturama.
+
+        GET /customers/status?rfc=... → {Rfc, FormatoCorrecto, Activo, Localizado}
+        (más campos como la lista 69-B si aplican, que se pasan tal cual).
+        Consume 1 folio de Facturama por llamada (es un botón manual).
+        """
+        with self._client() as c:
+            r = c.get("/customers/status", params={"rfc": rfc})
+            if r.status_code >= 400:
+                raise FacturamaError(f"validar_rfc failed: {r.status_code} {r.text[:500]}")
+            return r.json()
+
     def download_pdf(self, cfdi_id: str) -> bytes:
         with self._client() as c:
             r = c.get(f"/cfdi/pdf/issued/{cfdi_id}")

@@ -13,14 +13,17 @@ from __future__ import annotations
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from ...core.config import settings
 from ...core.rbac import AuthContext, get_tenant_db, require_permission
 from ...models import Cliente, ListaPrecios
 from ...schemas.cliente import ClienteCreate, ClienteOut, ClienteUpdate
 from ...schemas.common import Page
+from ...services.cliente_codigo import generate_cliente_codigo
+from ...services.facturama import FacturamaClient, FacturamaError
 from ._helpers import ensure_fk, flush_or_conflict, get_or_404, paginate
 
 router = APIRouter(prefix="/clientes", tags=["clientes"])
@@ -56,6 +59,25 @@ def list_clientes(
     return paginate(query, ClienteOut, limit, offset)
 
 
+@router.get("/validar-rfc")
+def validar_rfc(
+    rfc: str = Query(..., min_length=10, max_length=15),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """Valida un RFC contra el SAT vía Facturama.
+
+    Devuelve {Rfc, FormatoCorrecto, Activo, Localizado, ...}. Consume 1 folio de
+    Facturama por llamada (botón manual en el formulario de clientes).
+    """
+    client = FacturamaClient.from_settings(settings)
+    if not client.configured:
+        raise HTTPException(status_code=503, detail="Facturama (sandbox) no está configurado")
+    try:
+        return client.validar_rfc(rfc.strip().upper())
+    except FacturamaError as exc:
+        raise HTTPException(status_code=502, detail=f"No se pudo validar el RFC: {exc}")
+
+
 @router.post("", response_model=ClienteOut, status_code=status.HTTP_201_CREATED)
 def create_cliente(
     payload: ClienteCreate,
@@ -63,7 +85,11 @@ def create_cliente(
     ctx: AuthContext = Depends(require_permission(_WRITE)),
 ):
     ensure_fk(db, ListaPrecios, payload.lista_precios_id, "lista_precios_id")
-    obj = Cliente(**payload.model_dump(), tenant_id=ctx.tenant_id)
+    data = payload.model_dump()
+    # El código se genera SIEMPRE en el servidor; se ignora cualquier valor enviado.
+    data.pop("codigo", None)
+    codigo = generate_cliente_codigo(db, ctx.tenant_id)
+    obj = Cliente(**data, codigo=codigo, tenant_id=ctx.tenant_id)
     db.add(obj)
     flush_or_conflict(db, detail=_DUP)
     db.refresh(obj)
@@ -88,6 +114,8 @@ def update_cliente(
 ):
     obj = get_or_404(db, Cliente, cliente_id)
     data = payload.model_dump(exclude_unset=True)
+    # El código no se regenera ni se acepta en update: queda fijo desde la creación.
+    data.pop("codigo", None)
     if "lista_precios_id" in data:
         ensure_fk(db, ListaPrecios, data["lista_precios_id"], "lista_precios_id")
     for key, value in data.items():
