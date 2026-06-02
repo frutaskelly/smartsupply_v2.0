@@ -41,6 +41,13 @@ class Settings(BaseSettings):
     FACTURAMA_API_KEY: str = ""
     FACTURAMA_USER: str = ""
     FACTURAMA_PASSWORD: str = ""
+    # Cancelación simulada: el sandbox de Facturama NO cancela (devuelve 500). Con
+    # esto en true, cancelar_factura NO llama al PAC y solo aplica la lógica interna
+    # (estado CANCELADA + efecto en inventario por motivo). En producción: false.
+    FACTURAMA_FAKE_CANCEL: bool = False
+    # Levanta el guard "solo sandbox" para permitir el host de producción
+    # (api.facturama.mx). Mantener false hasta tener CSD/credenciales de producción.
+    FACTURAMA_ALLOW_PRODUCTION: bool = False
     # Emisor opcional: si está vacío, Facturama usa el CSD por defecto de la cuenta
     # (lo correcto en sandbox, donde el RFC real del tenant no tiene CSD registrado).
     FACTURAMA_ISSUER_RFC: str = ""

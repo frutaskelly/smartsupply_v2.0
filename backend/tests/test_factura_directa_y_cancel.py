@@ -165,6 +165,19 @@ def test_cancel_motivo_02_libera_para_refacturar(client, env, auth, fake_pac):
     assert refac.status_code == 201, refac.text
 
 
+def test_cancel_simulada_sin_pac(client, env, auth, monkeypatch):
+    """FACTURAMA_FAKE_CANCEL=true: cancela SIN llamar al PAC (sandbox no cancela),
+    aplicando la lógica interna (motivo 03 → devuelve inventario)."""
+    monkeypatch.setattr(facturas_mod.settings, "FACTURAMA_FAKE_CANCEL", True)
+    rem_id, fac_id = _remision_facturada_timbrada(client, env)
+    assert _disponible(env) == (Decimal("70"), Decimal("30"))
+    # sin fake_pac: si intentara llamar al PAC fallaría; el flag debe saltarlo
+    r = client.post(f"/api/v1/facturas/{fac_id}/cancelar", headers=_h(env), json={"motivo": "03"})
+    assert r.status_code == 200, r.text
+    assert r.json()["estado"] == "CANCELADA"
+    assert _disponible(env) == (Decimal("100"), Decimal("0"))
+
+
 def test_cancel_motivo_03_devuelve_inventario(client, env, auth, fake_pac):
     rem_id, fac_id = _remision_facturada_timbrada(client, env)
     assert _disponible(env) == (Decimal("70"), Decimal("30"))
