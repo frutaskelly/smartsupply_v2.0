@@ -145,7 +145,7 @@ export default function RemisionesPage() {
     // Sigue editable manualmente; el Enter pasa directo a las líneas.
     if (!fecha) setFecha(today());
     setStep("lineas");
-    setLineFocus({ key: lineas[0]?.key, field: "producto" });   // enfoca la primera línea
+    setLineFocus({ key: lineas[0]?.key, field: "cantidad" });   // enfoca la primera línea (Cantidad)
   }
 
   async function selectCliente(v: string) {
@@ -189,17 +189,18 @@ export default function RemisionesPage() {
   }, [lineFocus]);
 
   function advanceLine(key: string, from: LineField) {
+    // Secuencia: Cantidad → Producto → Presentación → Precio → (siguiente línea).
+    if (from === "cantidad") return setLineFocus({ key, field: "producto" });
     if (from === "producto") return setLineFocus({ key, field: "presentacion" });
-    if (from === "presentacion") return setLineFocus({ key, field: "cantidad" });
-    if (from === "cantidad") return setLineFocus({ key, field: "precio" });
-    // precio → siguiente línea (o crea una nueva si es la última)
+    if (from === "presentacion") return setLineFocus({ key, field: "precio" });
+    // precio → siguiente línea (o crea una nueva si es la última), enfocando Cantidad
     const idx = lineas.findIndex((l) => l.key === key);
     if (idx === lineas.length - 1) {
       const nl = nuevaLinea();
       setLineas((ls) => [...ls, nl]);
-      return setLineFocus({ key: nl.key, field: "producto" });
+      return setLineFocus({ key: nl.key, field: "cantidad" });
     }
-    return setLineFocus({ key: lineas[idx + 1].key, field: "producto" });
+    return setLineFocus({ key: lineas[idx + 1].key, field: "cantidad" });
   }
 
   async function cotizar(key: string, producto_id: string, presentacion: string, cantidad: string) {
@@ -291,7 +292,7 @@ export default function RemisionesPage() {
     toast.success(`${nuevas.length} líneas agregadas`);
   }
 
-  async function guardar() {
+  async function guardar(confirmar = false) {
     if (saving) return; // evita doble envío (doble clic / doble disparo)
     if (!clienteId) { toast.error("Elige un cliente"); return; }
     const lns = lineas.filter((l) => l.producto_id && Number(l.cantidad) > 0);
@@ -314,7 +315,12 @@ export default function RemisionesPage() {
       // `post` (useMutation) activa `saving`, que deshabilita el botón mientras
       // se crea — así un segundo clic/disparo no genera una remisión duplicada.
       const rem = await post<RemisionDetail>("/api/v1/remisiones", payload);
-      toast.success(`Remisión ${rem.folio_interno} creada`);
+      if (confirmar) {
+        await post(`/api/v1/remisiones/${rem.id}/confirmar`, {});
+        toast.success(`Remisión ${rem.folio_interno} confirmada (inventario reservado)`);
+      } else {
+        toast.success(`Remisión ${rem.folio_interno} guardada (borrador)`);
+      }
       setMode("list");
       reload();
     } catch (e) {
@@ -634,7 +640,11 @@ export default function RemisionesPage() {
                 <div className="flex gap-4"><span className="text-muted">IVA</span><span className="tabular-nums">{fmtMoney(ivaPreview)}</span></div>
                 <div className="flex gap-4 text-base font-semibold"><span className="text-muted">Total</span><span className="tabular-nums">{fmtMoney(totalPreview)}</span></div>
               </div>
-              <Button onClick={guardar} disabled={saving}>{saving ? "Guardando…" : "Guardar borrador"}</Button>
+              <div className="flex gap-2">
+                <Button variant="secondary" onClick={() => setMode("list")} disabled={saving}>Borrar</Button>
+                <Button variant="secondary" onClick={() => guardar(false)} disabled={saving}>{saving ? "Guardando…" : "Guardar"}</Button>
+                <Button onClick={() => guardar(true)} disabled={saving}>{saving ? "Guardando…" : "Confirmar"}</Button>
+              </div>
             </div>
           </div>
         </div>

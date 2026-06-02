@@ -15,6 +15,7 @@ import { Checkbox, Field, Input, Select, Switch, Textarea } from "@/components/u
 import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { SearchBox, SearchSelect, type SearchOption } from "@/components/ui/SearchBox";
+import { ProductoCombobox } from "@/components/ProductoCombobox";
 import { Spinner } from "@/components/ui/Spinner";
 import { Tabs } from "@/components/ui/Tabs";
 import { useToast } from "@/components/ui/Toast";
@@ -56,6 +57,7 @@ export default function SistemaDisenoPage() {
   const [modal, setModal] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const [busqueda, setBusqueda] = useState("");
+  const [prodSel, setProdSel] = useState<string | null>(null);
   const [unidadSat, setUnidadSat] = useState<string | null>("KGM");
   const [sel, setSel] = useState("a");
 
@@ -221,8 +223,8 @@ export default function SistemaDisenoPage() {
       </Card>
 
       {/* Search box */}
-      <Card title="Search box" subtitle="SearchBox (sencillo) · SearchSelect (búsqueda + dropdown)">
-        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+      <Card title="Search box" subtitle="SearchBox (sencillo) · SearchSelect (búsqueda + dropdown) · ProductoCombobox (buscador inteligente)">
+        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {/* 1) Sencillo */}
           <div>
             <h3 className="mb-1 text-sm font-semibold">1. Search box sencillo</h3>
@@ -249,6 +251,18 @@ export default function SistemaDisenoPage() {
             />
             <p className="mt-2 text-xs text-muted">
               Selección: <code className="rounded bg-surface-2 px-1">{unidadSat ?? "—"}</code>
+            </p>
+          </div>
+
+          {/* 3) Buscador de producto (inteligente, backend) */}
+          <div>
+            <h3 className="mb-1 text-sm font-semibold">3. Buscador de producto</h3>
+            <p className="mb-2 text-xs text-muted">
+              ProductoCombobox: cruce inteligente (exacto → alias → difuso → IA). Usado en remisiones, compras e inventario.
+            </p>
+            <ProductoCombobox onSelect={(p) => setProdSel(p ? p.nombre : null)} placeholder="Buscar producto…" />
+            <p className="mt-2 text-xs text-muted">
+              Selección: <code className="rounded bg-surface-2 px-1">{prodSel ?? "—"}</code>
             </p>
           </div>
         </div>
