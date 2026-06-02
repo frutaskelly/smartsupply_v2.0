@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .common import ORMModel
 
@@ -18,6 +18,17 @@ class MembershipUpdate(BaseModel):
     role_id: Optional[uuid.UUID] = None
     active: Optional[bool] = None
     acceso_todas_sucursales: Optional[bool] = None
+
+
+class CrearUsuarioIn(BaseModel):
+    email: str = Field(min_length=3, max_length=254)
+    full_name: Optional[str] = Field(default=None, max_length=254)
+    password: str = Field(min_length=8, max_length=128)
+    role_id: uuid.UUID
+
+
+class CambiarPasswordIn(BaseModel):
+    password: str = Field(min_length=8, max_length=128)
 
 
 class MembershipOut(ORMModel):

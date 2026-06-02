@@ -1,13 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { Trash2, UserCog } from "lucide-react";
+import { KeyRound, Plus, Trash2, UserCog } from "lucide-react";
 
 import { Badge } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { DataTable, type Column } from "@/components/ui/DataTable";
+import { DataTableSmart, type Column } from "@/components/ui/DataTableSmart";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { Select, Switch } from "@/components/ui/Field";
+import { Field, Input, Select, Switch } from "@/components/ui/Field";
+import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { useToast } from "@/components/ui/Toast";
 import { ApiError } from "@/lib/api";
@@ -21,7 +23,7 @@ export default function UsuariosPage() {
   const { me } = useAuth();
   const toast = useToast();
   const canWrite = can(me, WRITE);
-  const { patch, del } = useMutation();
+  const { post, patch, del } = useMutation();
 
   const membersRes = useResource<Membership[]>("/api/v1/memberships");
   const rolesRes = useResource<Role[]>("/api/v1/roles");
@@ -31,7 +33,70 @@ export default function UsuariosPage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [toRemove, setToRemove] = useState<Membership | null>(null);
 
+  // Crear usuario
+  const [createOpen, setCreateOpen] = useState(false);
+  const [cEmail, setCEmail] = useState("");
+  const [cName, setCName] = useState("");
+  const [cRole, setCRole] = useState("");
+  const [cPass, setCPass] = useState("");
+  const [creating, setCreating] = useState(false);
+
+  // Cambiar contraseña
+  const [pwdFor, setPwdFor] = useState<Membership | null>(null);
+  const [newPass, setNewPass] = useState("");
+  const [savingPwd, setSavingPwd] = useState(false);
+
   const isSelf = (m: Membership) => m.user_id === me?.user_id;
+
+  function openCreate() {
+    setCEmail("");
+    setCName("");
+    setCRole(roles[0]?.id ?? "");
+    setCPass("");
+    setCreateOpen(true);
+  }
+
+  const createValid =
+    cEmail.trim().length >= 3 && cEmail.includes("@") && cRole !== "" && cPass.length >= 8;
+
+  async function submitCreate() {
+    if (!createValid) return;
+    setCreating(true);
+    try {
+      await post("/api/v1/memberships/usuarios", {
+        email: cEmail.trim(),
+        full_name: cName.trim() || null,
+        password: cPass,
+        role_id: cRole,
+      });
+      toast.success("Usuario creado");
+      setCreateOpen(false);
+      membersRes.reload();
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudo crear el usuario");
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  function openPwd(m: Membership) {
+    setNewPass("");
+    setPwdFor(m);
+  }
+
+  async function submitPwd() {
+    if (!pwdFor || newPass.length < 8) return;
+    setSavingPwd(true);
+    try {
+      await post(`/api/v1/memberships/${pwdFor.id}/password`, { password: newPass });
+      toast.success("Contraseña actualizada");
+      setPwdFor(null);
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudo cambiar la contraseña");
+    } finally {
+      setSavingPwd(false);
+    }
+  }
 
   async function changeRole(m: Membership, roleId: string) {
     if (roleId === m.role_id) return;
@@ -126,14 +191,25 @@ export default function UsuariosPage() {
       className: "text-right w-1",
       cell: (m) =>
         canWrite && !isSelf(m) ? (
-          <button
-            onClick={() => setToRemove(m)}
-            disabled={busyId === m.id}
-            className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-danger"
-            aria-label="Remover"
-          >
-            <Trash2 size={16} />
-          </button>
+          <div className="flex items-center justify-end gap-1">
+            <button
+              onClick={() => openPwd(m)}
+              disabled={busyId === m.id}
+              className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-foreground"
+              aria-label="Cambiar contraseña"
+              title="Cambiar contraseña"
+            >
+              <KeyRound size={16} />
+            </button>
+            <button
+              onClick={() => setToRemove(m)}
+              disabled={busyId === m.id}
+              className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-danger"
+              aria-label="Remover"
+            >
+              <Trash2 size={16} />
+            </button>
+          </div>
         ) : null,
     },
   ];
@@ -143,6 +219,13 @@ export default function UsuariosPage() {
       <PageHeader
         title="Usuarios"
         subtitle="Asigna roles a los miembros de tu empresa, actívalos o remuévelos."
+        actions={
+          canWrite ? (
+            <Button onClick={openCreate}>
+              <Plus size={16} /> Crear usuario
+            </Button>
+          ) : undefined
+        }
       />
 
       {members.length === 0 && !membersRes.loading ? (
@@ -152,14 +235,93 @@ export default function UsuariosPage() {
           hint="El alta de nuevos usuarios se realiza durante el aprovisionamiento."
         />
       ) : (
-        <DataTable
+        <DataTableSmart
           columns={columns}
           rows={members}
           loading={membersRes.loading}
           error={membersRes.error}
           empty="Sin usuarios"
+          storageKey="usuarios"
         />
       )}
+
+      <Modal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        title="Crear usuario"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setCreateOpen(false)}>
+              Cancelar
+            </Button>
+            <Button onClick={submitCreate} disabled={creating || !createValid}>
+              {creating ? "Creando…" : "Crear"}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <Field label="Correo" required>
+            <Input
+              type="email"
+              value={cEmail}
+              onChange={(e) => setCEmail(e.target.value)}
+              placeholder="usuario@empresa.com"
+            />
+          </Field>
+          <Field label="Nombre">
+            <Input value={cName} onChange={(e) => setCName(e.target.value)} placeholder="Nombre completo" />
+          </Field>
+          <Field label="Rol" required>
+            <Select value={cRole} onChange={(e) => setCRole(e.target.value)}>
+              {roles.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.nombre}
+                  {r.es_preset ? "" : " (personalizado)"}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Contraseña" required hint="Mínimo 8 caracteres">
+            <Input
+              type="password"
+              value={cPass}
+              onChange={(e) => setCPass(e.target.value)}
+              autoComplete="new-password"
+            />
+          </Field>
+        </div>
+      </Modal>
+
+      <Modal
+        open={pwdFor !== null}
+        onClose={() => setPwdFor(null)}
+        title="Cambiar contraseña"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setPwdFor(null)}>
+              Cancelar
+            </Button>
+            <Button onClick={submitPwd} disabled={savingPwd || newPass.length < 8}>
+              {savingPwd ? "Guardando…" : "Guardar"}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-muted">
+            {pwdFor?.user_full_name || pwdFor?.user_email}
+          </p>
+          <Field label="Nueva contraseña" required hint="Mínimo 8 caracteres">
+            <Input
+              type="password"
+              value={newPass}
+              onChange={(e) => setNewPass(e.target.value)}
+              autoComplete="new-password"
+            />
+          </Field>
+        </div>
+      </Modal>
 
       <ConfirmDialog
         open={toRemove !== null}
