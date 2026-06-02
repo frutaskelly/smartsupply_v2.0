@@ -38,15 +38,17 @@ class FacturamaCredentials:
     user: str
     password: str
     base_url: str = "https://apisandbox.facturama.mx"
+    allow_production: bool = False
 
     @classmethod
     def from_settings(cls, settings) -> Optional["FacturamaCredentials"]:
         u = getattr(settings, "FACTURAMA_USER", None)
         p = getattr(settings, "FACTURAMA_PASSWORD", None)
         url = getattr(settings, "FACTURAMA_BASE_URL", "https://apisandbox.facturama.mx")
+        allow_prod = bool(getattr(settings, "FACTURAMA_ALLOW_PRODUCTION", False))
         if not u or not p:
             return None
-        return cls(user=u, password=p, base_url=url.rstrip("/"))
+        return cls(user=u, password=p, base_url=url.rstrip("/"), allow_production=allow_prod)
 
 
 class FacturamaClient:
@@ -69,10 +71,11 @@ class FacturamaClient:
             raise FacturamaConfigError(
                 "Facturama no configurado: define FACTURAMA_USER y FACTURAMA_PASSWORD en .env"
             )
-        if _SANDBOX_HOST not in self._creds.base_url:
-            # Guard duro: este módulo solo timbra en sandbox.
+        if _SANDBOX_HOST not in self._creds.base_url and not self._creds.allow_production:
+            # Guard: por defecto solo sandbox. Para producción, FACTURAMA_ALLOW_PRODUCTION=true.
             raise FacturamaError(
-                f"Timbrado bloqueado: FACTURAMA_BASE_URL debe apuntar a {_SANDBOX_HOST} (solo sandbox)."
+                f"Timbrado bloqueado: FACTURAMA_BASE_URL no es sandbox ({_SANDBOX_HOST}). "
+                f"Para producción define FACTURAMA_ALLOW_PRODUCTION=true."
             )
         return httpx.Client(
             base_url=self._creds.base_url,

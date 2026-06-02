@@ -388,16 +388,21 @@ def cancelar_factura(
     if payload.motivo == "01" and payload.uuid_sustitucion is None:
         raise HTTPException(status_code=422, detail="El motivo 01 requiere uuid_sustitucion")
 
-    client = FacturamaClient.from_settings(settings)
-    if not client.configured:
-        raise HTTPException(status_code=503, detail="Facturama (sandbox) no está configurado")
-    try:
-        client.cancel_cfdi(
-            factura.facturama_id, motive=payload.motivo,
-            uuid_replacement=str(payload.uuid_sustitucion) if payload.uuid_sustitucion else None,
-        )
-    except FacturamaError as exc:
-        raise HTTPException(status_code=502, detail=f"Cancelación rechazada por el PAC: {exc}")
+    if settings.FACTURAMA_FAKE_CANCEL:
+        # Cancelación simulada (el sandbox de Facturama no cancela). NO se llama al
+        # PAC; solo se aplica la lógica interna. En producción: FACTURAMA_FAKE_CANCEL=false.
+        pass
+    else:
+        client = FacturamaClient.from_settings(settings)
+        if not client.configured:
+            raise HTTPException(status_code=503, detail="Facturama no está configurado")
+        try:
+            client.cancel_cfdi(
+                factura.facturama_id, motive=payload.motivo,
+                uuid_replacement=str(payload.uuid_sustitucion) if payload.uuid_sustitucion else None,
+            )
+        except FacturamaError as exc:
+            raise HTTPException(status_code=502, detail=f"Cancelación rechazada por el PAC: {exc}")
 
     factura.estado = "CANCELADA"
     factura.fecha_cancelacion = func.now()
