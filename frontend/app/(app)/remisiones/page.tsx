@@ -1,14 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ClipboardPaste, FileText, Plus, Trash2, X } from "lucide-react";
+import { Check, ClipboardPaste, FileText, Mail, Plus, Printer, Trash2, X } from "lucide-react";
 
 import { KeyboardCombobox, type ComboOption } from "@/components/KeyboardCombobox";
 import { ProductoCombobox, type ProductoPick } from "@/components/ProductoCombobox";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { DataTable, type Column } from "@/components/ui/DataTable";
+import { DataTable, type Column, type RowAction } from "@/components/ui/DataTable";
 import { DataTableSmart } from "@/components/ui/DataTableSmart";
 import { Field, Input, Select, Textarea } from "@/components/ui/Field";
 import { Modal } from "@/components/ui/Modal";
@@ -401,6 +401,44 @@ export default function RemisionesPage() {
     }
   }
 
+  // Imprime la remisión en una ventana (vista imprimible).
+  async function imprimirRemision(r: Remision) {
+    let d = detalles[r.id];
+    if (!d) {
+      try {
+        d = await apiFetch<RemisionDetail>(`/api/v1/remisiones/${r.id}`);
+        setDetalles((m) => ({ ...m, [r.id]: d! }));
+      } catch {
+        toast.error("No se pudo cargar la remisión"); return;
+      }
+    }
+    const total = d.lineas.reduce((s, l) => s + Number(l.importe), 0);
+    const filas = d.lineas.map((l) =>
+      `<tr><td>${l.producto_nombre ?? prodById[l.producto_id]?.nombre ?? l.producto_id}</td>`
+      + `<td>${l.presentacion}</td>`
+      + `<td style="text-align:right">${fmtNumber(l.cantidad_solicitada)}</td>`
+      + `<td style="text-align:right">${fmtMoney(l.precio_unitario)}</td>`
+      + `<td style="text-align:right">${fmtMoney(l.importe)}</td></tr>`).join("");
+    const win = window.open("", "_blank", "width=820,height=640");
+    if (!win) { toast.error("Permite ventanas emergentes para imprimir"); return; }
+    win.document.write(
+      `<!doctype html><html><head><meta charset="utf-8"><title>Remisión ${r.folio_interno}</title>`
+      + `<style>body{font-family:system-ui,Arial,sans-serif;padding:24px;color:#111}h1{font-size:18px;margin:0 0 4px}`
+      + `table{width:100%;border-collapse:collapse;margin-top:12px;font-size:13px}th,td{border-bottom:1px solid #ddd;padding:6px 8px;text-align:left}`
+      + `th{background:#f4f4f5}tfoot td{font-weight:600}</style></head><body>`
+      + `<h1>Remisión ${r.folio_interno}</h1>`
+      + `<div>Cliente: ${cliName[d.cliente_facturacion_id] ?? "—"} &middot; Fecha: ${fmtDate(d.fecha_remision)} &middot; Estado: ${d.estado}</div>`
+      + `<table><thead><tr><th>Producto</th><th>Pres.</th><th style="text-align:right">Cant.</th><th style="text-align:right">Precio</th><th style="text-align:right">Importe</th></tr></thead>`
+      + `<tbody>${filas}</tbody>`
+      + `<tfoot><tr><td colspan="4" style="text-align:right">Total</td><td style="text-align:right">${fmtMoney(total)}</td></tr></tfoot></table>`
+      + `</body></html>`);
+    win.document.close(); win.focus(); win.print();
+  }
+
+  function enviarRemision(_r: Remision) {
+    toast.error("Para enviar por correo, primero conecta un proveedor de correo en Ajustes.");
+  }
+
   const columns: Column<Remision>[] = [
     { header: "Folio", cell: (r) => <span className="font-medium">{r.folio_interno}</span> },
     { header: "Cliente", cell: (r) => cliName[r.cliente_facturacion_id] ?? "—" },
@@ -411,20 +449,15 @@ export default function RemisionesPage() {
     { header: "IVA", className: "text-right tabular-nums", cell: (r) => fmtMoney(r.iva) },
     { header: "Total", className: "text-right tabular-nums", cell: (r) => fmtMoney(r.total) },
     { header: "Nota", cell: (r) => r.notas ?? "—" },
-    {
-      header: "",
-      className: "text-right w-1",
-      cell: (r) => (
-        <div className="flex justify-end gap-1">
-          {canWrite && r.estado === "BORRADOR" && (
-            <button onClick={(e) => { e.stopPropagation(); setToConfirm(r); }} className="rounded-md px-2 py-1 text-xs text-success hover:bg-surface-2">Confirmar</button>
-          )}
-          {canWrite && r.estado !== "CANCELADA" && (
-            <button onClick={(e) => { e.stopPropagation(); setToCancel(r); }} className="rounded-md px-2 py-1 text-xs text-danger hover:bg-surface-2">Cancelar</button>
-          )}
-        </div>
-      ),
-    },
+  ];
+
+  const rowActions: RowAction<Remision>[] = [
+    { id: "confirmar", label: "Confirmar", icon: <Check size={15} />, tone: "success",
+      onClick: (r) => setToConfirm(r), hidden: (r) => !(canWrite && r.estado === "BORRADOR") },
+    { id: "cancelar", label: "Cancelar", icon: <X size={15} />, tone: "danger",
+      onClick: (r) => setToCancel(r), hidden: (r) => !(canWrite && r.estado !== "CANCELADA") },
+    { id: "imprimir", label: "Imprimir", icon: <Printer size={15} />, onClick: (r) => { void imprimirRemision(r); } },
+    { id: "enviar", label: "Enviar por correo", icon: <Mail size={15} />, onClick: enviarRemision },
   ];
 
   // ───────────────────────── render ─────────────────────────
@@ -599,6 +632,7 @@ export default function RemisionesPage() {
         error={error}
         empty="Sin remisiones"
         rowKey={(r) => r.id}
+        actions={rowActions}
         onRowExpand={verDetalle}
         renderExpanded={renderDetalle}
         storageKey="remisiones"
