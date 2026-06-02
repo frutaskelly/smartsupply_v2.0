@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { Check, Pencil, Plus, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -37,7 +37,7 @@ export type CrudField = {
    * con el valor actual del campo (como string); el mensaje devuelto se
    * muestra con toast.success y los errores con toast.error.
    */
-  action?: { label: string; run: (value: string) => Promise<string> };
+  action?: { label: string; run: (value: string) => Promise<{ ok: boolean; message: string }> };
 };
 
 /** A select whose options come from another list endpoint. */
@@ -348,23 +348,39 @@ function FieldActionButton({
   action,
   value,
 }: {
-  action: { label: string; run: (value: string) => Promise<string> };
+  action: { label: string; run: (value: string) => Promise<{ ok: boolean; message: string }> };
   value: string;
 }) {
   const toast = useToast();
   const [busy, setBusy] = useState(false);
+  // Valor contra el que se verificó con éxito. Si el campo cambia después, se
+  // limpia el estado "Verificado" para no mostrar un resultado obsoleto.
+  const [verifiedValue, setVerifiedValue] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (verifiedValue !== null && value !== verifiedValue) setVerifiedValue(null);
+  }, [value, verifiedValue]);
 
   async function run() {
     setBusy(true);
     try {
-      const msg = await action.run(value);
-      toast.success(msg);
+      const { ok, message } = await action.run(value);
+      if (ok) {
+        toast.success(message);
+        setVerifiedValue(value);
+      } else {
+        toast.error(message);
+        setVerifiedValue(null);
+      }
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "La acción falló");
+      setVerifiedValue(null);
     } finally {
       setBusy(false);
     }
   }
+
+  const verified = verifiedValue !== null && verifiedValue === value;
 
   return (
     <Button
@@ -372,9 +388,17 @@ function FieldActionButton({
       variant="secondary"
       onClick={run}
       disabled={busy || !value.trim()}
-      className="shrink-0 whitespace-nowrap"
+      className={`shrink-0 whitespace-nowrap ${
+        verified ? "border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-600 hover:opacity-90" : ""
+      }`}
     >
-      {busy ? "…" : action.label}
+      {busy ? "…" : verified ? (
+        <>
+          <Check size={16} /> Verificado
+        </>
+      ) : (
+        action.label
+      )}
     </Button>
   );
 }

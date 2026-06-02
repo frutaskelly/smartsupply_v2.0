@@ -41,7 +41,6 @@ const config: CrudConfig<Cliente> = {
     { header: "Código", cell: (c) => c.codigo ?? "—" },
     { header: "Razón social", cell: (c) => <span className="font-medium">{c.legal_name}</span> },
     { header: "RFC", cell: (c) => c.rfc },
-    { header: "Tipo", cell: (c) => c.tipo },
     { header: "Estado", cell: (c) => <Badge tone={c.status === "ACTIVO" ? "success" : "muted"}>{c.status}</Badge> },
   ],
   fields: [
@@ -51,18 +50,28 @@ const config: CrudConfig<Cliente> = {
       name: "rfc",
       label: "RFC",
       required: true,
+      colSpan: 2,
       action: {
         label: "Verificar RFC",
+        // Facturama `/customers/status` solo devuelve FormatoCorrecto/Activo/Localizado:
+        // NO verifica que el Código Postal capturado esté ligado al RFC, ni la lista
+        // 69-B en sandbox (69-B sí aparecería en producción). Aquí solo validamos
+        // formato + activo + localizado en el SAT; el vínculo CP↔RFC no se comprueba.
         run: async (rfc) => {
           const r = await apiFetch<{ FormatoCorrecto: boolean; Activo: boolean; Localizado: boolean }>(
             `/api/v1/clientes/validar-rfc?rfc=${encodeURIComponent(rfc)}`,
           );
-          return r.Activo && r.Localizado
-            ? "RFC válido: activo y localizado en el SAT ✓"
-            : `RFC: formato ${r.FormatoCorrecto ? "ok" : "inválido"}, activo ${r.Activo ? "sí" : "no"}, localizado ${r.Localizado ? "sí" : "no"}`;
+          const ok = r.FormatoCorrecto && r.Activo && r.Localizado;
+          return {
+            ok,
+            message: ok
+              ? "RFC verificado: activo y localizado en el SAT ✓"
+              : `RFC: formato ${r.FormatoCorrecto ? "ok" : "inválido"}, activo ${r.Activo ? "sí" : "no"}, localizado ${r.Localizado ? "sí" : "no"}`,
+          };
         },
       },
     },
+    { name: "cp", label: "Código postal", required: true },
     {
       name: "regimen_fiscal",
       label: "Régimen fiscal SAT",
@@ -70,22 +79,10 @@ const config: CrudConfig<Cliente> = {
       required: true,
       options: REGIMEN_FISCAL_OPTS,
     },
-    {
-      name: "tipo",
-      label: "Tipo",
-      type: "select",
-      options: [
-        { value: "PRINCIPAL_GOV", label: "Principal (gobierno)" },
-        { value: "SUB", label: "Subcontrato" },
-        { value: "PRIVADO", label: "Privado" },
-        { value: "OTRO", label: "Otro" },
-      ],
-    },
     { name: "calle", label: "Calle y número", colSpan: 2 },
     { name: "colonia", label: "Colonia" },
     { name: "ciudad", label: "Ciudad/Municipio" },
     { name: "estado", label: "Estado" },
-    { name: "cp", label: "Código postal", required: true },
     { name: "pais", label: "País" },
     { name: "telefono", label: "Teléfono" },
     { name: "email", label: "Email" },
@@ -137,7 +134,6 @@ const config: CrudConfig<Cliente> = {
     legal_name: "",
     rfc: "",
     regimen_fiscal: "",
-    tipo: "PRIVADO",
     calle: "",
     colonia: "",
     ciudad: "",
@@ -160,7 +156,6 @@ const config: CrudConfig<Cliente> = {
       legal_name: c.legal_name,
       rfc: c.rfc,
       regimen_fiscal: c.regimen_fiscal ?? "",
-      tipo: c.tipo,
       calle: (dom.calle as string) ?? "",
       colonia: (dom.colonia as string) ?? "",
       ciudad: (dom.ciudad as string) ?? "",
@@ -188,7 +183,7 @@ const config: CrudConfig<Cliente> = {
       legal_name: v.legal_name,
       rfc: v.rfc,
       regimen_fiscal: (v.regimen_fiscal as string) || null,
-      tipo: v.tipo,
+      // `tipo` no se captura en el formulario; el backend usa su default "PRIVADO".
       domicilio_fiscal,
       lista_precios_id: (v.lista_precios_id as string) || null,
       limite_credito: Number(v.limite_credito) || 0,
