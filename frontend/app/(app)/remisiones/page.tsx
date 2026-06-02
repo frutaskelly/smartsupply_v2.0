@@ -534,8 +534,8 @@ export default function RemisionesPage() {
           <div className="space-y-2">
             <div className="hidden grid-cols-12 gap-2 px-1 text-xs text-muted sm:grid">
               <div className="col-span-2">Cantidad</div>
-              <div className="col-span-2">Presentación</div>
               <div className="col-span-3">Producto</div>
+              <div className="col-span-2">Presentación</div>
               <div className="col-span-2">Precio</div>
               <div className="col-span-1 text-right">IEPS</div>
               <div className="col-span-1 text-right">IVA</div>
@@ -551,6 +551,13 @@ export default function RemisionesPage() {
                     onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); advanceLine(l.key, "cantidad"); } }}
                   />
                 </div>
+                <div className="col-span-12 sm:col-span-3">
+                  <ProductoCombobox
+                    label={l.label || l.texto}
+                    onSelect={(p, t) => onPickProducto(l.key, p, t)}
+                    autoFocus={lineFocus?.key === l.key && lineFocus?.field === "producto"}
+                  />
+                </div>
                 <div className="col-span-4 sm:col-span-2">
                   <KeyboardCombobox
                     options={(l.presentaciones.length ? l.presentaciones : [l.presentacion]).map((p) => ({ value: p, label: p }))}
@@ -559,13 +566,6 @@ export default function RemisionesPage() {
                     onAdvance={() => advanceLine(l.key, "presentacion")}
                     autoOpen={lineFocus?.key === l.key && lineFocus?.field === "presentacion"}
                     placeholder="Presentación"
-                  />
-                </div>
-                <div className="col-span-12 sm:col-span-3">
-                  <ProductoCombobox
-                    label={l.label || l.texto}
-                    onSelect={(p, t) => onPickProducto(l.key, p, t)}
-                    autoFocus={lineFocus?.key === l.key && lineFocus?.field === "producto"}
                   />
                 </div>
                 <div className="col-span-3 sm:col-span-2">
