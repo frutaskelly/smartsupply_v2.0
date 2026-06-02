@@ -12,7 +12,7 @@ from decimal import Decimal
 from sqlalchemy.orm import Session
 
 from ..core.config import settings
-from ..models import Cliente, Factura, Tenant
+from ..models import Cliente, Factura, Producto, Tenant
 
 
 def _f(x) -> float:
@@ -53,30 +53,47 @@ def build_payload(db: Session, factura: Factura) -> dict:
     tenant = db.query(Tenant).filter(Tenant.id == factura.tenant_id).one()
     expedition = settings.FACTURAMA_EXPEDITION_PLACE or factura.lugar_expedicion or tenant.domicilio_fiscal_cp
 
+    # Productos (para los litros del IEPS por cuota).
+    prod_ids = {ln.producto_id for ln in factura.lineas if ln.producto_id}
+    productos = {p.id: p for p in db.query(Producto).filter(Producto.id.in_(prod_ids)).all()}
+
     items = []
     for ln in sorted(factura.lineas, key=lambda x: x.numero_linea):
         taxes = []
         retenciones = []
         if str(ln.objeto_imp) == "02":
-            # IVA siempre presente (incluso tasa 0): objeto "02" exige desglose por concepto.
+            ieps_imp = Decimal(str(ln.ieps_importe or 0))
+            # El IEPS se calcula ANTES del IVA → la base del IVA es importe + IEPS
+            # (regla CFDI). Así Base×Rate = Total que exige el PAC.
+            iva_base = Decimal(str(ln.importe)) + ieps_imp
             taxes.append({
-                "Total": _f(ln.iva_importe), "Name": "IVA", "Base": _f(ln.importe),
-                "Rate": _f(ln.iva_tasa), "IsRetention": False,
+                "Total": _f(ln.iva_importe), "Name": "IVA", "Base": _f(iva_base),
+                "Rate": _f(ln.iva_tasa), "IsRetention": False, "IsQuota": False,
             })
-            if ln.ieps_importe and Decimal(ln.ieps_importe) > 0:
+            if ieps_imp > 0:
+                # IEPS por CUOTA (TipoFactor Cuota): Base = unidades gravadas (litros),
+                # Rate = cuota → Base×Rate = importe IEPS. Por TASA: Base = importe, Rate = tasa.
+                es_cuota = str(ln.ieps_tipo) == "CUOTA"
+                if es_cuota:
+                    prod = productos.get(ln.producto_id)
+                    litros = Decimal(str(prod.contenido_litros)) if (prod and prod.contenido_litros) else ZERO
+                    ieps_base = (Decimal(str(ln.cantidad)) * litros) if litros else (
+                        ieps_imp / Decimal(str(ln.ieps_valor)) if ln.ieps_valor else ZERO)
+                else:
+                    ieps_base = Decimal(str(ln.importe))
                 taxes.append({
-                    "Total": _f(ln.ieps_importe), "Name": "IEPS", "Base": _f(ln.importe),
-                    "Rate": _f(ln.ieps_valor), "IsRetention": False,
+                    "Total": _f(ln.ieps_importe), "Name": "IEPS", "Base": _f(ieps_base),
+                    "Rate": _f(ln.ieps_valor), "IsRetention": False, "IsQuota": es_cuota,
                 })
             if ln.ret_iva_importe and Decimal(ln.ret_iva_importe) > 0:
                 retenciones.append({
                     "Total": _f(ln.ret_iva_importe), "Name": "IVA", "Base": _f(ln.importe),
-                    "Rate": _f(ln.iva_tasa), "IsRetention": True,
+                    "Rate": _f(ln.iva_tasa), "IsRetention": True, "IsQuota": False,
                 })
             if ln.ret_isr_importe and Decimal(ln.ret_isr_importe) > 0:
                 retenciones.append({
                     "Total": _f(ln.ret_isr_importe), "Name": "ISR", "Base": _f(ln.importe),
-                    "Rate": 0, "IsRetention": True,
+                    "Rate": 0, "IsRetention": True, "IsQuota": False,
                 })
 
         item = {
