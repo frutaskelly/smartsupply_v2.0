@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { PackagePlus } from "lucide-react";
 
+import { ProductoCombobox } from "@/components/ProductoCombobox";
 import { Button } from "@/components/ui/Button";
 import { DataTableSmart, type Column } from "@/components/ui/DataTableSmart";
 import { Field, Input, Select } from "@/components/ui/Field";
@@ -64,7 +65,7 @@ export default function InventarioPage() {
   const almacenes = almacenesRes.data?.items ?? [];
 
   const prodName = useMemo(
-    () => Object.fromEntries(productos.map((p) => [p.id, `${p.sku} · ${p.nombre}`])),
+    () => Object.fromEntries(productos.map((p) => [p.id, p.nombre])),
     [productos]
   );
   const almName = useMemo(
@@ -114,9 +115,7 @@ export default function InventarioPage() {
       header: "Producto",
       cell: (r) => (
         <span className="font-medium">
-          {r.producto_nombre
-            ? `${r.producto_sku ? `${r.producto_sku} · ` : ""}${r.producto_nombre}`
-            : prodName[r.producto_id] ?? r.producto_id}
+          {r.producto_nombre ?? prodName[r.producto_id] ?? r.producto_id}
         </span>
       ),
     },
@@ -181,14 +180,10 @@ export default function InventarioPage() {
               <Input type="number" step="0.0001" value={form.cantidad} onChange={(e) => set("cantidad", e.target.value)} />
             </Field>
             <Field label="Producto" required>
-              <Select value={form.producto_id} onChange={(e) => set("producto_id", e.target.value)}>
-                <option value="">— Selecciona —</option>
-                {productos.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.sku} · {p.nombre}
-                  </option>
-                ))}
-              </Select>
+              <ProductoCombobox
+                placeholder="Buscar producto por nombre o SKU…"
+                onSelect={(p) => set("producto_id", p ? p.producto_id : "")}
+              />
             </Field>
             <Field label={form.tipo === "TRANSFERENCIA" ? "Almacén origen" : "Almacén"} required>
               <Select value={form.almacen_id} onChange={(e) => set("almacen_id", e.target.value)}>
