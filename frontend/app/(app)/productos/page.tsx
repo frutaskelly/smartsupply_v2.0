@@ -10,6 +10,7 @@ import { DataTableSmart, type Column } from "@/components/ui/DataTableSmart";
 import { Field, Input, Select, Switch, Textarea } from "@/components/ui/Field";
 import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { ProductoCombobox } from "@/components/ProductoCombobox";
 import { ApiError, apiFetch } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import { useMutation, useResource, type Page } from "@/lib/hooks";
@@ -17,7 +18,6 @@ import { useToast } from "@/components/ui/Toast";
 import type { Categoria, Producto } from "@/lib/types";
 
 const WRITE = "producto:gestionar";
-const LIMIT = 20;
 
 // Unidades base más comunes (unidad interna de inventario).
 const UNIDADES_BASE = [
@@ -106,8 +106,6 @@ export default function ProductosPage() {
   const { post, patch, del, loading: saving } = useMutation();
   const canWrite = can(me, WRITE);
 
-  const [page, setPage] = useState(0);
-
   const categoriasRes = useResource<Page<Categoria>>("/api/v1/categorias?limit=200");
   const categorias = categoriasRes.data?.items ?? [];
   const catName = useMemo(
@@ -115,22 +113,20 @@ export default function ProductosPage() {
     [categorias]
   );
 
-  const listPath = useMemo(() => {
-    const p = new URLSearchParams();
-    p.set("limit", String(LIMIT));
-    p.set("offset", String(page * LIMIT));
-    return `/api/v1/productos?${p.toString()}`;
-  }, [page]);
-
-  const { data, loading, error, reload } = useResource<Page<Producto>>(listPath);
+  // Se carga la lista completa: DataTableSmart se encarga de la paginación,
+  // búsqueda y orden en cliente sobre todas las filas.
+  const { data, loading, error, reload } = useResource<Page<Producto>>(
+    "/api/v1/productos?limit=1000"
+  );
   const rows = data?.items ?? [];
-  const total = data?.total ?? 0;
 
   const [form, setForm] = useState<FormState | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [toDelete, setToDelete] = useState<Producto | null>(null);
   const [suggesting, setSuggesting] = useState(false);
   const [satOpciones, setSatOpciones] = useState<SatOpcion[]>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerText, setPickerText] = useState("");
 
   async function suggestSat() {
     if (!form) return;
@@ -165,6 +161,12 @@ export default function ProductosPage() {
     setEditingId(null);
     setSatOpciones([]);
     setForm(emptyForm());
+  }
+  // Alta tras el buscador: crea con el nombre ya tecleado (evita duplicados).
+  function openCreateWith(nombre: string) {
+    setEditingId(null);
+    setSatOpciones([]);
+    setForm({ ...emptyForm(), nombre });
   }
   function openEdit(p: Producto) {
     setEditingId(p.id);
@@ -271,9 +273,6 @@ export default function ProductosPage() {
     },
   ];
 
-  const from = total === 0 ? 0 : page * LIMIT + 1;
-  const to = Math.min((page + 1) * LIMIT, total);
-
   return (
     <div>
       <PageHeader
@@ -281,7 +280,7 @@ export default function ProductosPage() {
         subtitle="Catálogo de productos"
         actions={
           canWrite ? (
-            <Button onClick={openCreate}>
+            <Button onClick={() => { setPickerText(""); setPickerOpen(true); }}>
               <Plus size={16} /> Nuevo producto
             </Button>
           ) : undefined
@@ -290,19 +289,36 @@ export default function ProductosPage() {
 
       <DataTableSmart columns={columns} rows={rows} loading={loading} error={error} empty="Sin productos" storageKey="productos" />
 
-      <div className="mt-4 flex items-center justify-between text-sm text-muted">
-        <span>
-          {from}–{to} de {total}
-        </span>
-        <div className="flex gap-2">
-          <Button variant="secondary" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>
-            Anterior
-          </Button>
-          <Button variant="secondary" disabled={to >= total} onClick={() => setPage((p) => p + 1)}>
-            Siguiente
+      {/* Alta: buscar primero (evita duplicados) → elegir existente o crear nuevo */}
+      <Modal
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        title="Nuevo producto"
+        footer={<Button variant="secondary" onClick={() => setPickerOpen(false)}>Cancelar</Button>}
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-muted">Busca primero para evitar duplicados. Si no existe, créalo.</p>
+          <ProductoCombobox
+            autoFocus
+            placeholder="Buscar producto por nombre o SKU…"
+            onSelect={(p, texto) => {
+              setPickerText(texto);
+              if (p) {
+                const full = rows.find((r) => r.id === p.producto_id);
+                setPickerOpen(false);
+                if (full) openEdit(full);
+                else openCreateWith(p.nombre);
+              }
+            }}
+          />
+          <Button
+            variant="secondary"
+            onClick={() => { setPickerOpen(false); openCreateWith(pickerText.trim()); }}
+          >
+            <Plus size={16} /> Crear nuevo producto{pickerText.trim() ? ` «${pickerText.trim()}»` : ""}
           </Button>
         </div>
-      </div>
+      </Modal>
 
       <Modal
         open={form !== null}
