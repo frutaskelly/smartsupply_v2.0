@@ -164,7 +164,7 @@ export default function ListasPreciosPage() {
         subtitle="Niveles de venta (único, menudeo, mayoreo…) con precios por presentación y volumen."
         actions={canWrite ? (
           <Button onClick={() => setListaForm({ codigo: "", nombre: "", status: "ACTIVO" })}>
-            <Plus size={16} /> Nueva lista
+            <Plus size={16} /> Nueva lista de precios
           </Button>
         ) : undefined}
       />

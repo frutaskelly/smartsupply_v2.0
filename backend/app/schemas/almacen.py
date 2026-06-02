@@ -9,7 +9,8 @@ from .common import ORMModel
 
 
 class AlmacenBase(BaseModel):
-    codigo: str = Field(max_length=20)
+    # `codigo` se autogenera en el servidor (ALM-NNN); opcional como entrada.
+    codigo: Optional[str] = Field(default=None, max_length=20)
     nombre: str = Field(max_length=254)
     calle: Optional[str] = Field(default=None, max_length=254)
     colonia: Optional[str] = Field(default=None, max_length=120)

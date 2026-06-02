@@ -27,6 +27,19 @@ _WRITE = "almacen:gestionar"
 _DUP = "Ya existe un almacén con ese código"
 
 
+def _generate_codigo(db: Session, tenant_id) -> str:
+    """Código secuencial por tenant: ALM-01, ALM-02, … (único)."""
+    existing = {
+        c
+        for (c,) in db.query(Almacen.codigo).filter(Almacen.tenant_id == tenant_id).all()
+        if c
+    }
+    n = len(existing) + 1
+    while f"ALM-{n:02d}" in existing:
+        n += 1
+    return f"ALM-{n:02d}"
+
+
 def _clear_other_defaults(db: Session, keep_id: Optional[UUID] = None) -> None:
     """Unset es_default on every (other) warehouse in the current tenant scope."""
     query = db.query(Almacen).filter(
@@ -59,7 +72,9 @@ def create_almacen(
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_WRITE)),
 ):
-    obj = Almacen(**payload.model_dump(), tenant_id=ctx.tenant_id)
+    data = payload.model_dump()
+    data["codigo"] = _generate_codigo(db, ctx.tenant_id)
+    obj = Almacen(**data, tenant_id=ctx.tenant_id)
     db.add(obj)
     flush_or_conflict(db, detail=_DUP)
     if obj.es_default:

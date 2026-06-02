@@ -587,6 +587,8 @@ export function DataTable<T>({
               })}
               {hasActions && (
                 <th className="px-2 py-2.5 text-right font-medium">
+                  <span className="inline-flex items-center justify-end gap-1.5">
+                    <span>Opciones</span>
                   {actionsMenu ? (
                     <div className="relative inline-block" ref={actionsMenuRef}>
                       <button
@@ -640,6 +642,7 @@ export function DataTable<T>({
                       )}
                     </div>
                   ) : null}
+                  </span>
                 </th>
               )}
             </tr>

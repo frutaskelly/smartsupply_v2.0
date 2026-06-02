@@ -7,6 +7,7 @@ import type { Almacen } from "@/lib/types";
 const config: CrudConfig<Almacen> = {
   title: "Almacenes",
   subtitle: "Almacenes / puntos de stock",
+  newLabel: "Nuevo almacén",
   basePath: "/api/v1/almacenes",
   writePerm: "almacen:gestionar",
   searchable: false,
@@ -22,7 +23,7 @@ const config: CrudConfig<Almacen> = {
     { header: "Predeterminado", cell: (a) => (a.es_default ? <Badge tone="accent">Sí</Badge> : "—") },
   ],
   fields: [
-    { name: "codigo", label: "Código", required: true },
+    { name: "codigo", label: "Código", readonly: true, hint: "Se genera automáticamente" },
     { name: "nombre", label: "Nombre", required: true },
     { name: "calle", label: "Calle y número", colSpan: 2 },
     { name: "colonia", label: "Colonia" },
@@ -43,7 +44,7 @@ const config: CrudConfig<Almacen> = {
     es_default: a.es_default,
   }),
   toPayload: (v) => ({
-    codigo: v.codigo,
+    // `codigo` lo autogenera el backend (ALM-NNN); no se envía.
     nombre: v.nombre,
     calle: (v.calle as string) || null,
     colonia: (v.colonia as string) || null,

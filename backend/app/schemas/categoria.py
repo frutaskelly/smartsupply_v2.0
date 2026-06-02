@@ -9,18 +9,18 @@ from .common import ORMModel
 
 
 class CategoriaBase(BaseModel):
-    # `codigo` no se acepta como entrada: se autogenera a partir del nombre en
-    # el router (única fuente de verdad). Sólo aparece en la salida.
     nombre: str = Field(max_length=100)
     descripcion: Optional[str] = None
     activo: bool = True
 
 
 class CategoriaCreate(CategoriaBase):
-    pass
+    # `codigo` es manual y obligatorio para categorías.
+    codigo: str = Field(min_length=1, max_length=10)
 
 
 class CategoriaUpdate(BaseModel):
+    codigo: Optional[str] = Field(default=None, max_length=10)
     nombre: Optional[str] = Field(default=None, max_length=100)
     descripcion: Optional[str] = None
     activo: Optional[bool] = None

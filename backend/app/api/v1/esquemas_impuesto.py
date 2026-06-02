@@ -29,6 +29,21 @@ _WRITE = "esquema_impuesto:gestionar"
 _DUP = "Ya existe un esquema de impuesto con ese código"
 
 
+def _generate_codigo(db: Session, tenant_id) -> str:
+    """Código secuencial por tenant: ESQ-01, ESQ-02, … (único)."""
+    existing = {
+        c
+        for (c,) in db.query(EsquemaImpuesto.codigo)
+        .filter(EsquemaImpuesto.tenant_id == tenant_id)
+        .all()
+        if c
+    }
+    n = len(existing) + 1
+    while f"ESQ-{n:02d}" in existing:
+        n += 1
+    return f"ESQ-{n:02d}"
+
+
 @router.get("", response_model=Page[EsquemaImpuestoOut])
 def list_esquemas(
     q: Optional[str] = Query(default=None, max_length=120),
@@ -56,7 +71,9 @@ def create_esquema(
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_WRITE)),
 ):
-    obj = EsquemaImpuesto(**payload.model_dump(), tenant_id=ctx.tenant_id)
+    data = payload.model_dump()
+    data["codigo"] = _generate_codigo(db, ctx.tenant_id)
+    obj = EsquemaImpuesto(**data, tenant_id=ctx.tenant_id)
     db.add(obj)
     flush_or_conflict(db, detail=_DUP)
     db.refresh(obj)

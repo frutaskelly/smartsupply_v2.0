@@ -7,6 +7,7 @@ import type { Proveedor } from "@/lib/types";
 const config: CrudConfig<Proveedor> = {
   title: "Proveedores",
   subtitle: "Catálogo de proveedores",
+  newLabel: "Nuevo proveedor",
   basePath: "/api/v1/proveedores",
   writePerm: "proveedor:gestionar",
   searchable: false,

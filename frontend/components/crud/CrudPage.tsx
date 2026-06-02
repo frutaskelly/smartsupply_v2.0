@@ -28,8 +28,16 @@ export type CrudField = {
   colSpan?: 1 | 2;
   /** Campo no editable (se muestra deshabilitado). */
   readOnly?: boolean;
+  /** Alias de `readOnly`: campo no editable (lo rellena el servidor). */
+  readonly?: boolean;
   /** Valor derivado de otros campos; se recalcula al cambiar el formulario. */
   derive?: (form: FormValues) => string;
+  /**
+   * Botón de acción secundario junto al input. Al pulsarlo se ejecuta `run`
+   * con el valor actual del campo (como string); el mensaje devuelto se
+   * muestra con toast.success y los errores con toast.error.
+   */
+  action?: { label: string; run: (value: string) => Promise<string> };
 };
 
 /** A select whose options come from another list endpoint. */
@@ -42,6 +50,8 @@ export type Lookup = {
 export type CrudConfig<T> = {
   title: string;
   subtitle?: string;
+  /** Texto del botón de crear (p. ej. "Nueva categoría"). */
+  newLabel?: string;
   basePath: string;
   writePerm: string;
   searchable?: boolean;
@@ -139,8 +149,9 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
   async function save() {
     if (!form) return;
     for (const f of config.fields) {
+      const isReadonly = f.readonly || f.readOnly;
       const v = form[f.name];
-      if (f.required && typeof v === "string" && !v.trim()) {
+      if (f.required && !isReadonly && typeof v === "string" && !v.trim()) {
         toast.error(`${f.label} es obligatorio`);
         return;
       }
@@ -217,7 +228,7 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
         actions={
           canWrite ? (
             <Button onClick={openCreate}>
-              <Plus size={16} /> Nuevo
+              <Plus size={16} /> {config.newLabel ?? `Nuevo ${config.title.toLowerCase()}`}
             </Button>
           ) : undefined
         }
@@ -274,6 +285,7 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
                   </div>
                 );
               }
+              const isReadonly = f.readonly || f.readOnly;
               return (
                 <div key={f.name} className={cls}>
                   <Field label={f.label} required={f.required} hint={f.hint}>
@@ -292,21 +304,24 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
                       // `decimal` usa un input de texto (no el nativo `number`,
                       // que muestra el separador decimal según el locale del SO
                       // y acaba pintando "0,0000"). Aquí siempre se usa punto.
-                      <Input
-                        type={f.type === "number" ? "number" : "text"}
-                        inputMode={f.type === "decimal" ? "decimal" : undefined}
-                        step={f.step}
-                        placeholder={f.placeholder}
-                        value={String(val ?? "")}
-                        onChange={(e) =>
-                          setField(
-                            f.name,
-                            f.type === "decimal" ? e.target.value.replace(",", ".") : e.target.value,
-                          )
-                        }
-                        disabled={f.readOnly}
-                        readOnly={f.readOnly}
-                      />
+                      <div className={f.action ? "flex items-center gap-2" : undefined}>
+                        <Input
+                          type={f.type === "number" ? "number" : "text"}
+                          inputMode={f.type === "decimal" ? "decimal" : undefined}
+                          step={f.step}
+                          placeholder={f.placeholder}
+                          value={String(val ?? "")}
+                          onChange={(e) =>
+                            setField(
+                              f.name,
+                              f.type === "decimal" ? e.target.value.replace(",", ".") : e.target.value,
+                            )
+                          }
+                          disabled={isReadonly}
+                          readOnly={isReadonly}
+                        />
+                        {f.action && <FieldActionButton action={f.action} value={String(val ?? "")} />}
+                      </div>
                     )}
                   </Field>
                 </div>
@@ -325,5 +340,41 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
         loading={saving}
       />
     </div>
+  );
+}
+
+/** Botón de acción secundario asociado a un campo (p. ej. "Verificar RFC"). */
+function FieldActionButton({
+  action,
+  value,
+}: {
+  action: { label: string; run: (value: string) => Promise<string> };
+  value: string;
+}) {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+
+  async function run() {
+    setBusy(true);
+    try {
+      const msg = await action.run(value);
+      toast.success(msg);
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "La acción falló");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Button
+      type="button"
+      variant="secondary"
+      onClick={run}
+      disabled={busy || !value.trim()}
+      className="shrink-0 whitespace-nowrap"
+    >
+      {busy ? "…" : action.label}
+    </Button>
   );
 }

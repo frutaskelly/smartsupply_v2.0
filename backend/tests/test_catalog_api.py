@@ -164,17 +164,20 @@ def test_admin_full_crud_categoria(client, env, auth_as):
     assert client.get("/api/v1/categorias", headers=h).json()["total"] == 0
 
 
-def test_categoria_codigo_autogenerado(client, env, auth_as):
-    # El código de categoría se deriva del nombre (sin acentos, 5 chars); un
-    # nombre repetido no choca: se le agrega sufijo único.
+def test_categoria_codigo_manual_required(client, env, auth_as):
+    # El código de categoría es MANUAL y obligatorio: el cliente lo escribe.
     auth_as(env["admin_a"])
     h = _hdr(env["admin_a"])
-    r1 = client.post("/api/v1/categorias", headers=h, json={"nombre": "Lácteos"})
+    # Sin código → 422.
+    r0 = client.post("/api/v1/categorias", headers=h, json={"nombre": "Lácteos"})
+    assert r0.status_code == 422, r0.text
+    # Con código → se respeta tal cual.
+    r1 = client.post("/api/v1/categorias", headers=h, json={"codigo": "LACTE", "nombre": "Lácteos"})
     assert r1.status_code == 201, r1.text
     assert r1.json()["codigo"] == "LACTE"
-    r2 = client.post("/api/v1/categorias", headers=h, json={"nombre": "Lácteos"})
-    assert r2.status_code == 201
-    assert r2.json()["codigo"] == "LACTE2"
+    # Código duplicado → 409.
+    r2 = client.post("/api/v1/categorias", headers=h, json={"codigo": "LACTE", "nombre": "Otra"})
+    assert r2.status_code == 409, r2.text
 
 
 def test_producto_with_valid_and_invalid_fk(client, env, auth_as):
@@ -297,12 +300,19 @@ def test_admin_full_crud_esquema(client, env, auth_as):
     assert client.get("/api/v1/esquemas-impuesto", headers=h).json()["total"] == 0
 
 
-def test_esquema_duplicate_codigo_conflicts(client, env, auth_as):
+def test_esquema_codigo_autogenerado(client, env, auth_as):
+    # El código de esquema se autogenera (ESQ-NN) e ignora el del cliente, así
+    # que dos altas con el mismo código de entrada NO chocan: cada una recibe
+    # un código secuencial único.
     auth_as(env["admin_a"])
     h = _hdr(env["admin_a"])
-    body = {"codigo": "DUP", "nombre": "Uno"}
-    assert client.post("/api/v1/esquemas-impuesto", headers=h, json=body).status_code == 201
-    assert client.post("/api/v1/esquemas-impuesto", headers=h, json=body).status_code == 409
+    r1 = client.post("/api/v1/esquemas-impuesto", headers=h, json={"codigo": "DUP", "nombre": "Uno"})
+    assert r1.status_code == 201, r1.text
+    r2 = client.post("/api/v1/esquemas-impuesto", headers=h, json={"codigo": "DUP", "nombre": "Dos"})
+    assert r2.status_code == 201, r2.text
+    c1, c2 = r1.json()["codigo"], r2.json()["codigo"]
+    assert c1 != c2
+    assert c1.startswith("ESQ-") and c2.startswith("ESQ-")
 
 
 def test_esquema_rate_out_of_range_422(client, env, auth_as):
@@ -365,13 +375,18 @@ def test_admin_full_crud_cliente(client, env, auth_as):
     assert client.get("/api/v1/clientes", headers=h).json()["total"] == 0
 
 
-def test_cliente_duplicate_codigo_conflicts(client, env, auth_as):
+def test_cliente_codigo_autogenerado(client, env, auth_as):
+    """El código de cliente se genera server-side (regla global); el código
+    enviado por el cliente se ignora y cada alta obtiene uno único."""
     auth_as(env["admin_a"])
     h = _hdr(env["admin_a"])
-    body = {"codigo": "DUP", "legal_name": "Uno", "rfc": "XAXX010101000"}
-    assert client.post("/api/v1/clientes", headers=h, json=body).status_code == 201
-    body2 = {"codigo": "DUP", "legal_name": "Dos", "rfc": "XEXX010101000"}
-    assert client.post("/api/v1/clientes", headers=h, json=body2).status_code == 409
+    a = client.post("/api/v1/clientes", headers=h,
+                    json={"codigo": "DUP", "legal_name": "Uno", "rfc": "XAXX010101000"})
+    b = client.post("/api/v1/clientes", headers=h,
+                    json={"codigo": "DUP", "legal_name": "Dos", "rfc": "XEXX010101000"})
+    assert a.status_code == 201 and b.status_code == 201, (a.text, b.text)
+    ca, cb = a.json()["codigo"], b.json()["codigo"]
+    assert ca and cb and ca != cb  # auto-generados y únicos
 
 
 def test_cliente_with_valid_and_invalid_lista_fk(client, env, auth_as):

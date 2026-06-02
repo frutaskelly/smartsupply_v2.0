@@ -193,7 +193,7 @@ export default function ComprasPage() {
       <PageHeader
         title="Compras"
         subtitle="Órdenes de compra a proveedores. Al recibir, la mercancía entra a inventario."
-        actions={canWrite ? <Button onClick={openCreate}><Plus size={16} /> Nueva orden</Button> : undefined}
+        actions={canWrite ? <Button onClick={openCreate}><Plus size={16} /> Nueva orden de compra</Button> : undefined}
       />
 
       <DataTableSmart columns={cols} rows={ordenes} loading={loading} error={error} empty="Sin órdenes de compra" onRowClick={(o) => openDetail(o.id)} columnsMenu resizable exportable exportFilename="ordenes-compra" storageKey="compras-oc" />

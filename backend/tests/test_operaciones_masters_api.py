@@ -175,9 +175,14 @@ def test_admin_crud_almacen_single_default(client, env, auth_as):
     assert client.patch(f"/api/v1/almacenes/{a1_id}", headers=h, json={"es_default": True}).status_code == 200
     assert client.get(f"/api/v1/almacenes/{a2_id}", headers=h).json()["es_default"] is False
 
-    # dup codigo → 409
-    assert client.post("/api/v1/almacenes", headers=h,
-                       json={"codigo": "BG-001", "nombre": "x"}).status_code == 409
+    # codigo se autogenera (ALM-NN) e ignora el del cliente: el código de
+    # entrada repetido NO choca, cada alta recibe uno único.
+    a3 = client.post("/api/v1/almacenes", headers=h,
+                     json={"codigo": "BG-001", "nombre": "x"})
+    assert a3.status_code == 201, a3.text
+    codigos = {a1.json()["codigo"], a2.json()["codigo"], a3.json()["codigo"]}
+    assert len(codigos) == 3
+    assert all(c.startswith("ALM-") for c in codigos)
 
     # soft delete
     assert client.delete(f"/api/v1/almacenes/{a2_id}", headers=h).status_code == 204

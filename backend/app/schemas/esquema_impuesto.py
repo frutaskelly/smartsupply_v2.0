@@ -12,7 +12,8 @@ TipoIeps = Literal["TASA", "CUOTA"]
 
 
 class EsquemaImpuestoBase(BaseModel):
-    codigo: str = Field(max_length=10)
+    # `codigo` se autogenera en el servidor (ESQ-NNN); opcional como entrada.
+    codigo: Optional[str] = Field(default=None, max_length=10)
     nombre: str = Field(max_length=120)
     descripcion: Optional[str] = None
     iva_tasa: Decimal = Field(default=Decimal("0"), ge=0, le=1)

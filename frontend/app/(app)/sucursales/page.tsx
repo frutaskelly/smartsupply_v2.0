@@ -251,7 +251,7 @@ export default function SucursalesPage() {
                       </Select>
                     </Field>
                   </div>
-                  <Button onClick={addSucursal}><Plus size={16} /> Agregar</Button>
+                  <Button onClick={addSucursal}><Plus size={16} /> Nueva sucursal</Button>
                 </div>
                 <p className="text-xs text-muted">El código se genera automáticamente (SUC-01, SUC-02, …). La serie de la sucursal gana sobre la del cliente.</p>
               </div>
