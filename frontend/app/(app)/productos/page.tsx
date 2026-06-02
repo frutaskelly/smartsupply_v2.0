@@ -301,13 +301,19 @@ export default function ProductosPage() {
           <ProductoCombobox
             autoFocus
             placeholder="Buscar producto por nombre o SKU…"
-            onSelect={(p, texto) => {
+            onSelect={async (p, texto) => {
               setPickerText(texto);
-              if (p) {
-                const full = rows.find((r) => r.id === p.producto_id);
-                setPickerOpen(false);
-                if (full) openEdit(full);
-                else openCreateWith(p.nombre);
+              if (!p) return;
+              setPickerOpen(false);
+              // Un match existente NUNCA debe crear un duplicado: si está en la
+              // lista cargada lo editamos directo; si no (catálogo grande), lo
+              // traemos por id. Solo se crea desde el botón "Crear nuevo".
+              const full = rows.find((r) => r.id === p.producto_id);
+              if (full) { openEdit(full); return; }
+              try {
+                openEdit(await apiFetch<Producto>(`/api/v1/productos/${p.producto_id}`));
+              } catch {
+                toast.error("No se pudo abrir el producto seleccionado");
               }
             }}
           />

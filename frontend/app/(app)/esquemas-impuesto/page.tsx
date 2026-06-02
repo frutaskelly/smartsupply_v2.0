@@ -4,6 +4,11 @@ import { CrudPage, type CrudConfig } from "@/components/crud/CrudPage";
 import { Badge } from "@/components/ui/Badge";
 import type { EsquemaImpuesto } from "@/lib/types";
 
+// Fracción (0.16) → porcentaje legible sin redondear a entero. Conserva
+// decimales reales de las retenciones (ISR 1.25%, IVA 10.6667%) y limpia el
+// ruido de punto flotante. 0.16 → "16", 0.0125 → "1.25".
+const pct = (frac: unknown): string => String(+(Number(frac) * 100).toFixed(4));
+
 const config: CrudConfig<EsquemaImpuesto> = {
   title: "Esquemas de impuesto",
   subtitle: "Tasas de IVA / IEPS y retenciones",
@@ -13,8 +18,8 @@ const config: CrudConfig<EsquemaImpuesto> = {
   columns: [
     { header: "Código", cell: (e) => <span className="font-medium">{e.codigo}</span> },
     { header: "Nombre", cell: (e) => e.nombre },
-    { header: "IVA", cell: (e) => `${Math.round(Number(e.iva_tasa) * 100)}%`, className: "text-right" },
-    { header: "IEPS", cell: (e) => `${Math.round(Number(e.ieps_tasa) * 100)}%`, className: "text-right" },
+    { header: "IVA", cell: (e) => `${pct(e.iva_tasa)}%`, className: "text-right" },
+    { header: "IEPS", cell: (e) => `${pct(e.ieps_tasa)}%`, className: "text-right" },
     { header: "Exento", cell: (e) => (e.iva_exento ? "Sí" : "No") },
     { header: "Estado", cell: (e) => <Badge tone={e.activo ? "success" : "muted"}>{e.activo ? "Activo" : "Inactivo"}</Badge> },
   ],
@@ -22,10 +27,10 @@ const config: CrudConfig<EsquemaImpuesto> = {
     { name: "codigo", label: "Código", readonly: true, hint: "Se genera automáticamente" },
     { name: "nombre", label: "Nombre", required: true },
     { name: "descripcion", label: "Descripción", type: "textarea", colSpan: 2 },
-    { name: "iva_tasa", label: "Tasa IVA (%)", type: "number", step: "1", hint: "Porcentaje entero: 16 = 16%" },
-    { name: "ieps_tasa", label: "Tasa IEPS (%)", type: "number", step: "1", hint: "Porcentaje entero: 8 = 8%" },
-    { name: "retencion_iva_tasa", label: "Retención IVA (%)", type: "number", step: "1" },
-    { name: "retencion_isr_tasa", label: "Retención ISR (%)", type: "number", step: "1" },
+    { name: "iva_tasa", label: "Tasa IVA (%)", type: "number", step: "0.01", hint: "16 = 16%. Admite decimales." },
+    { name: "ieps_tasa", label: "Tasa IEPS (%)", type: "number", step: "0.01", hint: "8 = 8%. Admite decimales." },
+    { name: "retencion_iva_tasa", label: "Retención IVA (%)", type: "number", step: "0.0001", hint: "Ej. 10.6667" },
+    { name: "retencion_isr_tasa", label: "Retención ISR (%)", type: "number", step: "0.01", hint: "Ej. 1.25" },
     { name: "iva_exento", label: "IVA exento", type: "switch" },
     { name: "activo", label: "Activo", type: "switch" },
   ],
@@ -44,11 +49,11 @@ const config: CrudConfig<EsquemaImpuesto> = {
     codigo: e.codigo,
     nombre: e.nombre,
     descripcion: e.descripcion ?? "",
-    // El backend guarda fracción (0.16); el form usa % entero (16).
-    iva_tasa: String(Math.round(Number(e.iva_tasa) * 100)),
-    ieps_tasa: String(Math.round(Number(e.ieps_tasa) * 100)),
-    retencion_iva_tasa: String(Math.round(Number(e.retencion_iva_tasa) * 100)),
-    retencion_isr_tasa: String(Math.round(Number(e.retencion_isr_tasa) * 100)),
+    // El backend guarda fracción (0.16); el form usa % (16), con decimales.
+    iva_tasa: pct(e.iva_tasa),
+    ieps_tasa: pct(e.ieps_tasa),
+    retencion_iva_tasa: pct(e.retencion_iva_tasa),
+    retencion_isr_tasa: pct(e.retencion_isr_tasa),
     iva_exento: e.iva_exento,
     activo: e.activo,
   }),

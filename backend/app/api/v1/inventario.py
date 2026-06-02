@@ -81,6 +81,9 @@ def existencias(
         )
         .join(Producto, Producto.id == LoteInventario.producto_id)
         .join(Almacen, Almacen.id == LoteInventario.almacen_id)
+        # Excluye catálogo borrado (soft-delete): un producto/almacén eliminado
+        # no debe seguir apareciendo en existencias ni en la valuación.
+        .filter(Producto.deleted_at.is_(None), Almacen.deleted_at.is_(None))
     )
     if producto_id is not None:
         query = query.filter(LoteInventario.producto_id == producto_id)

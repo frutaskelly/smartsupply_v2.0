@@ -19,6 +19,7 @@ def _f(x) -> float:
     return float(Decimal(str(x or 0)))
 
 
+ZERO = Decimal("0")
 _RFC_PUBLICO = "XAXX010101000"
 
 

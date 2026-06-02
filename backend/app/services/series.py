@@ -61,7 +61,10 @@ def resolver_serie(
             if s:
                 return s
 
-    # 4) serie predeterminada del inquilino para ese tipo de documento
+    # 4) serie predeterminada del inquilino para ese tipo de documento.
+    # Usa first() (no one_or_none) por robustez: la unicidad de es_default se
+    # cuida en la app, pero si por una carrera quedaran dos, no debe tronar el
+    # timbrado con MultipleResultsFound (500). La más antigua gana, determinista.
     return (
         db.query(Serie)
         .filter(
@@ -70,7 +73,8 @@ def resolver_serie(
             Serie.es_default.is_(True),
             Serie.activa.is_(True),
         )
-        .one_or_none()
+        .order_by(Serie.created_at.asc())
+        .first()
     )
 
 
