@@ -26,6 +26,7 @@ from ...models import (
     EsquemaImpuesto,
     Factura,
     LineaFactura,
+    LoteInventario,
     Producto,
     Remision,
     Tenant,
@@ -35,12 +36,13 @@ from ...schemas.factura import (
     CancelarFacturaIn,
     FacturaDesdeRemisionesIn,
     FacturaDetailOut,
+    FacturaDirectaIn,
     FacturaOut,
 )
 from ...services.cfdi import build_payload
 from ...services.facturama import FacturamaClient, FacturamaError
 from ...services.fiscal import calcular_linea, totales
-from ...services.inventario import presentacion_sat
+from ...services.inventario import build_movimiento, presentacion_factor, presentacion_sat
 from ...services.series import consumir_folio, resolver_serie, siguiente_folio
 from ._helpers import get_or_404, paginate
 
@@ -62,6 +64,57 @@ def _next_folio(db: Session, tenant_id, serie: str) -> int:
         if f and f > mx:
             mx = f
     return mx + 1
+
+
+def _fiscal_calc(prod, esq, importe: Decimal, cantidad: Decimal) -> dict:
+    """Desglose fiscal (IVA/IEPS/retenciones) de una línea desde el esquema del
+    producto. Compartido por factura-desde-remisiones y factura-directa."""
+    iva_tasa = esq.iva_tasa if esq else (prod.iva_tasa if prod else ZERO)
+    iva_exento = bool(esq.iva_exento) if esq else False
+    tipo_ieps = esq.tipo_ieps if esq else None
+    ieps_tasa = esq.ieps_tasa if esq else ZERO
+    ieps_cuota = esq.ieps_cuota if esq else ZERO
+    ret_iva_tasa = esq.retencion_iva_tasa if esq else ZERO
+    ret_isr_tasa = esq.retencion_isr_tasa if esq else ZERO
+    litros = (cantidad * Decimal(prod.contenido_litros)) if (prod and prod.contenido_litros) else ZERO
+    return calcular_linea(
+        importe, iva_tasa=iva_tasa, iva_exento=iva_exento,
+        tipo_ieps=tipo_ieps, ieps_tasa=ieps_tasa, ieps_cuota=ieps_cuota,
+        litros_totales=litros, ret_iva_tasa=ret_iva_tasa, ret_isr_tasa=ret_isr_tasa,
+    )
+
+
+def _release_remision_stock(db: Session, rems, ctx, factura) -> None:
+    """Devuelve a 'disponible' el stock reservado por remisiones CONFIRMADAS
+    (motivo 03 de cancelación de factura: la operación no se llevó a cabo)."""
+    prod_ids = {ln.producto_id for r in rems for ln in r.lineas if ln.lote_id}
+    productos = {p.id: p for p in db.query(Producto).filter(Producto.id.in_(prod_ids)).all()}
+    for r in rems:
+        if r.estado != "CONFIRMADA":
+            continue
+        for ln in r.lineas:
+            if ln.lote_id is None:
+                continue
+            lote = (
+                db.query(LoteInventario)
+                .filter(LoteInventario.id == ln.lote_id)
+                .with_for_update()
+                .one_or_none()
+            )
+            if lote is None:
+                continue
+            if ln.cantidad_surtida is not None:
+                cantidad = Decimal(ln.cantidad_surtida)
+            else:
+                cantidad = Decimal(ln.cantidad_solicitada) * presentacion_factor(
+                    productos.get(ln.producto_id), ln.presentacion)
+            lote.cantidad_reservada = max(ZERO, lote.cantidad_reservada - cantidad)
+            lote.cantidad_disponible = lote.cantidad_disponible + cantidad
+            db.add(build_movimiento(
+                ctx.tenant_id, ctx.user_id, lote, "CANCELACION_REMISION", cantidad,
+                ref_tipo="FACTURA", ref_id=factura.id,
+                motivo=f"Cancelación factura {factura.serie}{factura.folio} (motivo 03)",
+            ))
 
 
 @router.get("", response_model=Page[FacturaOut])
@@ -207,6 +260,82 @@ def factura_desde_remisiones(
     return factura
 
 
+@router.post("/directa", response_model=FacturaDetailOut, status_code=status.HTTP_201_CREATED)
+def factura_directa(
+    payload: FacturaDirectaIn,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """Crea una factura capturada a mano (sin remisión, sin afectar inventario).
+    Las líneas referencian productos del catálogo para tomar su clave SAT y su
+    desglose fiscal."""
+    cliente = get_or_404(db, Cliente, payload.cliente_id)
+    tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
+
+    prod_ids = {ln.producto_id for ln in payload.lineas}
+    productos = {p.id: p for p in db.query(Producto).filter(Producto.id.in_(prod_ids)).all()}
+    if len(productos) != len(prod_ids):
+        raise HTTPException(status_code=404, detail="Uno o más productos no existen")
+    esq_ids = {p.esquema_impuesto_id for p in productos.values() if p.esquema_impuesto_id}
+    esquemas = {e.id: e for e in db.query(EsquemaImpuesto).filter(EsquemaImpuesto.id.in_(esq_ids)).all()}
+
+    serie_obj = resolver_serie(
+        db, ctx.tenant_id, "FACTURA", serie_id=payload.serie_id, cliente_id=cliente.id,
+    )
+    if serie_obj is not None:
+        folio = consumir_folio(db, serie_obj.id)
+        serie_codigo = serie_obj.codigo
+        if folio is None:
+            serie_codigo = payload.serie or serie_obj.codigo
+            folio = _next_folio(db, ctx.tenant_id, serie_codigo)
+    else:
+        serie_codigo = payload.serie or "A"
+        folio = _next_folio(db, ctx.tenant_id, serie_codigo)
+
+    factura = Factura(
+        tenant_id=ctx.tenant_id, serie=serie_codigo, folio=folio, cliente_id=cliente.id,
+        uso_cfdi=payload.uso_cfdi or cliente.uso_cfdi_default or "G03",
+        forma_pago=payload.forma_pago or cliente.forma_pago_default or "99",
+        metodo_pago=payload.metodo_pago or cliente.metodo_pago_default or "PUE",
+        lugar_expedicion=tenant.domicilio_fiscal_cp,
+        notas=payload.notas, created_by=ctx.user_id, estado="BORRADOR",
+    )
+    db.add(factura); db.flush()
+
+    calc_lineas = []
+    for numero, ln in enumerate(payload.lineas, start=1):
+        prod = productos.get(ln.producto_id)
+        esq = esquemas.get(prod.esquema_impuesto_id) if prod and prod.esquema_impuesto_id else None
+        cantidad = Decimal(ln.cantidad)
+        valor_unitario = Decimal(ln.precio_unitario)
+        importe = (cantidad * valor_unitario).quantize(Decimal("0.0001"))
+        clave_unidad = presentacion_sat(prod, ln.presentacion) or (prod.unidad_sat if prod else "H87")
+        calc = _fiscal_calc(prod, esq, importe, cantidad)
+        calc_lineas.append(calc)
+        db.add(LineaFactura(
+            tenant_id=ctx.tenant_id, factura_id=factura.id, numero_linea=numero,
+            producto_id=ln.producto_id,
+            clave_prod_serv=(prod.clave_sat if prod else "01010101"),
+            clave_unidad=clave_unidad, descripcion=(prod.nombre if prod else "Producto"),
+            cantidad=cantidad, valor_unitario=valor_unitario, importe=importe, objeto_imp="02",
+            iva_tasa=calc["iva_tasa"], iva_importe=calc["iva_importe"],
+            ieps_tipo=calc["ieps_tipo"], ieps_valor=calc["ieps_valor"], ieps_importe=calc["ieps_importe"],
+            ret_iva_importe=calc["ret_iva_importe"], ret_isr_importe=calc["ret_isr_importe"],
+        ))
+
+    tot = totales(calc_lineas)
+    factura.subtotal = tot["subtotal"]
+    factura.descuento = tot["descuento"]
+    factura.iva_trasladado = tot["iva_trasladado"]
+    factura.ieps_trasladado = tot["ieps_trasladado"]
+    factura.ret_iva = tot["ret_iva"]
+    factura.ret_isr = tot["ret_isr"]
+    factura.total = tot["total"]
+    db.flush()
+    db.refresh(factura)
+    return factura
+
+
 # ─── Timbrado (SOLO SANDBOX) ──────────────────────────────────────────────────
 @router.post("/{factura_id}/timbrar", response_model=FacturaDetailOut)
 def timbrar_factura(
@@ -274,9 +403,23 @@ def cancelar_factura(
     factura.fecha_cancelacion = func.now()
     factura.motivo_cancelacion = payload.motivo
     factura.uuid_sustitucion = str(payload.uuid_sustitucion) if payload.uuid_sustitucion else None
-    # liberar remisiones para que puedan re-facturarse
-    for r in db.query(Remision).filter(Remision.factura_id == factura.id).all():
-        r.factura_id = None
+
+    rems = db.query(Remision).filter(Remision.factura_id == factura.id).all()
+    if payload.motivo == "03":
+        # "No se llevó a cabo la operación": la venta NO ocurrió → se devuelve el
+        # inventario reservado y la(s) remisión(es) quedan CANCELADAS (no se
+        # refacturan, porque no hubo operación).
+        _release_remision_stock(db, rems, ctx, factura)
+        for r in rems:
+            if r.estado == "CONFIRMADA":
+                r.estado = "CANCELADA"
+            r.factura_id = None
+    else:
+        # 01/02/04 (errores/sustitución/global): la operación sí ocurre y se
+        # reexpide → se liberan las remisiones para refacturar; el inventario
+        # permanece reservado (la mercancía sigue saliendo).
+        for r in rems:
+            r.factura_id = None
     db.flush()
     db.refresh(factura)
     return factura
