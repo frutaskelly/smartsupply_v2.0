@@ -10,7 +10,7 @@ const config: CrudConfig<Categoria> = {
   subtitle: "Categorías de productos",
   basePath: "/api/v1/categorias",
   writePerm: "categoria:gestionar",
-  searchable: true,
+  searchable: false,
   columns: [
     { header: "Código", cell: (c) => <span className="font-medium">{c.codigo}</span> },
     { header: "Nombre", cell: (c) => c.nombre },

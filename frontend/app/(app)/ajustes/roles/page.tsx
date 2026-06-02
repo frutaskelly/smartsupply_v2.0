@@ -6,7 +6,7 @@ import { Eye, Lock, Pencil, Plus, Shield, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { DataTable, type Column } from "@/components/ui/DataTable";
+import { DataTableSmart, type Column } from "@/components/ui/DataTableSmart";
 import { Checkbox, Field, Input } from "@/components/ui/Field";
 import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -221,13 +221,14 @@ export default function RolesPage() {
         }
       />
 
-      <DataTable
+      <DataTableSmart
         columns={columns}
         rows={roles}
         loading={rolesRes.loading}
         error={rolesRes.error}
         empty="Sin roles"
         onRowClick={(r) => openRole(r)}
+        storageKey="roles"
       />
 
       <Modal

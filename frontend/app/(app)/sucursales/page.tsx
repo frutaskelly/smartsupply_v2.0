@@ -5,6 +5,7 @@ import { Building2, Calculator, Plus, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
 import { DataTable, type Column } from "@/components/ui/DataTable";
+import { DataTableSmart } from "@/components/ui/DataTableSmart";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Field, Input, Select } from "@/components/ui/Field";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -255,7 +256,7 @@ export default function SucursalesPage() {
                 <p className="text-xs text-muted">El código se genera automáticamente (SUC-01, SUC-02, …). La serie de la sucursal gana sobre la del cliente.</p>
               </div>
             )}
-            <DataTable columns={sucCols} rows={sucursales} empty="Sin sucursales (las ventas usan el precio del cliente)" />
+            <DataTableSmart columns={sucCols} rows={sucursales} empty="Sin sucursales (las ventas usan el precio del cliente)" storageKey="sucursales" />
           </section>
 
           {/* Precios especiales (overrides) */}

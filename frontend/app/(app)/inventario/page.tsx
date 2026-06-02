@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { PackagePlus } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
-import { DataTable, type Column } from "@/components/ui/DataTable";
+import { DataTableSmart, type Column } from "@/components/ui/DataTableSmart";
 import { Field, Input, Select } from "@/components/ui/Field";
 import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -72,17 +72,9 @@ export default function InventarioPage() {
     [almacenes]
   );
 
-  const [fProducto, setFProducto] = useState("");
-  const [fAlmacen, setFAlmacen] = useState("");
-  const existPath = useMemo(() => {
-    const p = new URLSearchParams();
-    if (fProducto) p.set("producto_id", fProducto);
-    if (fAlmacen) p.set("almacen_id", fAlmacen);
-    const qs = p.toString();
-    return `/api/v1/inventario/existencias${qs ? `?${qs}` : ""}`;
-  }, [fProducto, fAlmacen]);
-
-  const { data: existencias, loading, error, reload } = useResource<ExistenciaRow[]>(existPath);
+  const { data: existencias, loading, error, reload } = useResource<ExistenciaRow[]>(
+    "/api/v1/inventario/existencias"
+  );
   const rows = existencias ?? [];
 
   const [form, setForm] = useState<MovForm | null>(null);
@@ -151,26 +143,7 @@ export default function InventarioPage() {
         }
       />
 
-      <div className="mb-4 flex flex-wrap gap-2">
-        <Select value={fProducto} onChange={(e) => setFProducto(e.target.value)} className="max-w-xs">
-          <option value="">Todos los productos</option>
-          {productos.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.sku} · {p.nombre}
-            </option>
-          ))}
-        </Select>
-        <Select value={fAlmacen} onChange={(e) => setFAlmacen(e.target.value)} className="max-w-[14rem]">
-          <option value="">Todos los almacenes</option>
-          {almacenes.map((a) => (
-            <option key={a.id} value={a.id}>
-              {a.nombre}
-            </option>
-          ))}
-        </Select>
-      </div>
-
-      <DataTable columns={columns} rows={rows} loading={loading} error={error} empty="Sin existencias" />
+      <DataTableSmart columns={columns} rows={rows} loading={loading} error={error} empty="Sin existencias" storageKey="inventario" />
 
       {rows.length > 0 && (
         <div className="mt-3 text-right text-sm text-muted">

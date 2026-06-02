@@ -9,7 +9,7 @@ const config: CrudConfig<Cliente> = {
   subtitle: "Clientes / CRM",
   basePath: "/api/v1/clientes",
   writePerm: "cliente:gestionar",
-  searchable: true,
+  searchable: false,
   columns: [
     { header: "Código", cell: (c) => c.codigo ?? "—" },
     { header: "Razón social", cell: (c) => <span className="font-medium">{c.legal_name}</span> },

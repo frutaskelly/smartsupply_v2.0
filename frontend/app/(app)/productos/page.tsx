@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { DataTable, type Column } from "@/components/ui/DataTable";
+import { DataTableSmart, type Column } from "@/components/ui/DataTableSmart";
 import { Field, Input, Select, Switch, Textarea } from "@/components/ui/Field";
 import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -106,19 +106,7 @@ export default function ProductosPage() {
   const { post, patch, del, loading: saving } = useMutation();
   const canWrite = can(me, WRITE);
 
-  const [q, setQ] = useState("");
-  const [dq, setDq] = useState("");
-  const [categoriaId, setCategoriaId] = useState("");
-  const [activo, setActivo] = useState("");
   const [page, setPage] = useState(0);
-
-  useEffect(() => {
-    const t = setTimeout(() => {
-      setDq(q);
-      setPage(0);
-    }, 300);
-    return () => clearTimeout(t);
-  }, [q]);
 
   const categoriasRes = useResource<Page<Categoria>>("/api/v1/categorias?limit=200");
   const categorias = categoriasRes.data?.items ?? [];
@@ -131,11 +119,8 @@ export default function ProductosPage() {
     const p = new URLSearchParams();
     p.set("limit", String(LIMIT));
     p.set("offset", String(page * LIMIT));
-    if (dq.trim()) p.set("q", dq.trim());
-    if (categoriaId) p.set("categoria_id", categoriaId);
-    if (activo) p.set("activo", activo);
     return `/api/v1/productos?${p.toString()}`;
-  }, [page, dq, categoriaId, activo]);
+  }, [page]);
 
   const { data, loading, error, reload } = useResource<Page<Producto>>(listPath);
   const rows = data?.items ?? [];
@@ -303,43 +288,7 @@ export default function ProductosPage() {
         }
       />
 
-      <div className="mb-4 flex flex-wrap gap-2">
-        <Input
-          placeholder="Buscar por SKU, nombre o RFC…"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          className="max-w-xs"
-        />
-        <Select
-          value={categoriaId}
-          onChange={(e) => {
-            setCategoriaId(e.target.value);
-            setPage(0);
-          }}
-          className="max-w-[12rem]"
-        >
-          <option value="">Todas las categorías</option>
-          {categorias.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.nombre}
-            </option>
-          ))}
-        </Select>
-        <Select
-          value={activo}
-          onChange={(e) => {
-            setActivo(e.target.value);
-            setPage(0);
-          }}
-          className="max-w-[10rem]"
-        >
-          <option value="">Todos</option>
-          <option value="true">Activos</option>
-          <option value="false">Inactivos</option>
-        </Select>
-      </div>
-
-      <DataTable columns={columns} rows={rows} loading={loading} error={error} empty="Sin productos" />
+      <DataTableSmart columns={columns} rows={rows} loading={loading} error={error} empty="Sin productos" storageKey="productos" />
 
       <div className="mt-4 flex items-center justify-between text-sm text-muted">
         <span>

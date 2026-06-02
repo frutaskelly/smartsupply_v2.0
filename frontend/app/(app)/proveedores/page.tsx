@@ -9,7 +9,7 @@ const config: CrudConfig<Proveedor> = {
   subtitle: "Catálogo de proveedores",
   basePath: "/api/v1/proveedores",
   writePerm: "proveedor:gestionar",
-  searchable: true,
+  searchable: false,
   columns: [
     { header: "Código", cell: (p) => <span className="font-medium">{p.codigo}</span> },
     { header: "Nombre", cell: (p) => p.nombre },

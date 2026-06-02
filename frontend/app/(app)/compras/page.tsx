@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { DataTable, type Column } from "@/components/ui/DataTable";
+import { DataTableSmart } from "@/components/ui/DataTableSmart";
 import { Field, Input, Select, Textarea } from "@/components/ui/Field";
 import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -30,7 +31,6 @@ const ESTADO: Record<string, { label: string; tone: Tone }> = {
   RECIBIDA: { label: "Recibida", tone: "success" },
   CANCELADA: { label: "Cancelada", tone: "danger" },
 };
-const ESTADO_FILTROS = ["BORRADOR", "ENVIADA", "ACEPTADA", "EN_TRANSITO", "RECIBIDA_PARCIAL", "RECIBIDA", "CANCELADA"];
 
 // Transiciones "positivas" del flujo. La recepción se hace aparte con /recibir,
 // que sí suma la mercancía a inventario; por eso RECIBIDA no se ofrece como
@@ -54,13 +54,7 @@ export default function ComprasPage() {
   const canWrite = can(me, WRITE);
   const { post } = useMutation();
 
-  const [estado, setEstado] = useState("");
-  const listPath = useMemo(() => {
-    const p = new URLSearchParams({ limit: "100" });
-    if (estado) p.set("estado", estado);
-    return `${BASE}?${p.toString()}`;
-  }, [estado]);
-  const { data, loading, error, reload } = useResource<Page<OrdenCompra>>(listPath);
+  const { data, loading, error, reload } = useResource<Page<OrdenCompra>>(`${BASE}?limit=100`);
   const ordenes = data?.items ?? [];
 
   const proveedores = useResource<Page<Proveedor>>("/api/v1/proveedores?limit=200").data?.items ?? [];
@@ -202,14 +196,7 @@ export default function ComprasPage() {
         actions={canWrite ? <Button onClick={openCreate}><Plus size={16} /> Nueva orden</Button> : undefined}
       />
 
-      <div className="mb-4 max-w-xs">
-        <Select value={estado} onChange={(e) => setEstado(e.target.value)}>
-          <option value="">Todos los estados</option>
-          {ESTADO_FILTROS.map((s) => <option key={s} value={s}>{ESTADO[s].label}</option>)}
-        </Select>
-      </div>
-
-      <DataTable columns={cols} rows={ordenes} loading={loading} error={error} empty="Sin órdenes de compra" onRowClick={(o) => openDetail(o.id)} columnsMenu resizable exportable exportFilename="ordenes-compra" storageKey="compras-oc" />
+      <DataTableSmart columns={cols} rows={ordenes} loading={loading} error={error} empty="Sin órdenes de compra" onRowClick={(o) => openDetail(o.id)} columnsMenu resizable exportable exportFilename="ordenes-compra" storageKey="compras-oc" />
 
       {/* ── Alta ── */}
       <Modal
@@ -322,32 +309,19 @@ export default function ComprasPage() {
               <div><div className="text-xs text-muted">Recibida</div>{fmtDate(detail.fecha_recibida)}</div>
             </div>
 
-            <div className="overflow-hidden rounded-lg border border-border">
-              <table className="w-full text-sm">
-                <thead className="bg-surface-2 text-left text-xs text-muted">
-                  <tr>
-                    <th className="px-3 py-2">Producto</th>
-                    <th className="px-3 py-2">Present.</th>
-                    <th className="px-3 py-2 text-right">Solicitado</th>
-                    <th className="px-3 py-2 text-right">Recibido</th>
-                    <th className="px-3 py-2 text-right">Costo</th>
-                    <th className="px-3 py-2 text-right">Importe</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(detail.lineas ?? []).map((l) => (
-                    <tr key={l.id} className="border-t border-border">
-                      <td className="px-3 py-2">{prodName[l.producto_id] ?? l.producto_id}</td>
-                      <td className="px-3 py-2">{l.presentacion ?? "—"}</td>
-                      <td className="px-3 py-2 text-right">{Number(l.cantidad_solicitada)}</td>
-                      <td className="px-3 py-2 text-right">{Number(l.cantidad_recibida)}</td>
-                      <td className="px-3 py-2 text-right">{fmtMoney(l.precio_unitario)}</td>
-                      <td className="px-3 py-2 text-right">{fmtMoney(l.importe)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <DataTable
+              rows={detail.lineas ?? []}
+              rowKey={(l) => l.id}
+              empty="Sin líneas"
+              columns={[
+                { header: "Producto", cell: (l) => prodName[l.producto_id] ?? l.producto_id },
+                { header: "Present.", cell: (l) => l.presentacion ?? "—" },
+                { header: "Solicitado", className: "text-right tabular-nums", cell: (l) => Number(l.cantidad_solicitada) },
+                { header: "Recibido", className: "text-right tabular-nums", cell: (l) => Number(l.cantidad_recibida) },
+                { header: "Costo", className: "text-right tabular-nums", cell: (l) => fmtMoney(l.precio_unitario) },
+                { header: "Importe", className: "text-right tabular-nums", cell: (l) => fmtMoney(l.importe) },
+              ]}
+            />
 
             <div className="flex justify-end gap-6 text-sm">
               <div><span className="text-muted">Total estimado:&nbsp;</span><b>{fmtMoney(detail.total_estimado)}</b></div>

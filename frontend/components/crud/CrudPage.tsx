@@ -5,7 +5,7 @@ import { Pencil, Plus, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { DataTable, type Column } from "@/components/ui/DataTable";
+import { DataTableSmart, type Column } from "@/components/ui/DataTableSmart";
 import { Field, Input, Select, Switch, Textarea } from "@/components/ui/Field";
 import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -229,7 +229,7 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
         </div>
       )}
 
-      <DataTable columns={columns} rows={rows} loading={loading} error={error} empty="Sin resultados" />
+      <DataTableSmart columns={columns} rows={rows} loading={loading} error={error} empty="Sin resultados" storageKey={`crud-${config.basePath}`} />
 
       <div className="mt-4 flex items-center justify-between text-sm text-muted">
         <span>

@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { DataTable, type Column } from "@/components/ui/DataTable";
+import { DataTableSmart } from "@/components/ui/DataTableSmart";
 import { Field, Input, Select } from "@/components/ui/Field";
 import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -168,13 +169,14 @@ export default function ListasPreciosPage() {
         ) : undefined}
       />
 
-      <DataTable
+      <DataTableSmart
         columns={columns}
         rows={listas}
         loading={listasRes.loading}
         error={listasRes.error}
         empty="Sin listas de precios"
         onRowClick={(l) => openPrecios(l)}
+        storageKey="listas-precios"
       />
 
       {/* editor de lista */}

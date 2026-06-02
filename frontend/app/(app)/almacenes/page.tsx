@@ -9,7 +9,7 @@ const config: CrudConfig<Almacen> = {
   subtitle: "Almacenes / puntos de stock",
   basePath: "/api/v1/almacenes",
   writePerm: "almacen:gestionar",
-  searchable: true,
+  searchable: false,
   columns: [
     { header: "Código", cell: (a) => <span className="font-medium">{a.codigo}</span> },
     { header: "Nombre", cell: (a) => a.nombre },

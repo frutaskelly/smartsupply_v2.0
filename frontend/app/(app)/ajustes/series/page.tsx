@@ -6,7 +6,7 @@ import { Pencil, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { DataTable, type Column } from "@/components/ui/DataTable";
+import { DataTableSmart, type Column } from "@/components/ui/DataTableSmart";
 import { Field, Input, Select, Switch } from "@/components/ui/Field";
 import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -239,7 +239,7 @@ export default function SeriesPage() {
         }
       />
 
-      <DataTable
+      <DataTableSmart
         columns={columns}
         rows={rows}
         loading={loading}
@@ -248,7 +248,7 @@ export default function SeriesPage() {
         columnsMenu
         exportable
         exportFilename="series"
-        storageKey="ajustes-series"
+        storageKey="series"
       />
 
       {/* ── Modal único: nueva serie / editar ── */}

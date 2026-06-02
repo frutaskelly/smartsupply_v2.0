@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { DataTable, type Column } from "@/components/ui/DataTable";
+import { DataTableSmart } from "@/components/ui/DataTableSmart";
 import { Checkbox, Field, Select } from "@/components/ui/Field";
 import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -37,15 +38,7 @@ export default function FacturasPage() {
   const seriesFacRes = useResource<Page<Serie>>("/api/v1/series?tipo_documento=FACTURA&activa=true&limit=200");
   const seriesFac = seriesFacRes.data?.items ?? [];
 
-  const [fEstado, setFEstado] = useState("");
-  const [fCliente, setFCliente] = useState("");
-  const listPath = useMemo(() => {
-    const p = new URLSearchParams({ limit: "50" });
-    if (fEstado) p.set("estado", fEstado);
-    if (fCliente) p.set("cliente_id", fCliente);
-    return `/api/v1/facturas?${p.toString()}`;
-  }, [fEstado, fCliente]);
-  const { data, loading, error, reload } = useResource<Page<Factura>>(listPath);
+  const { data, loading, error, reload } = useResource<Page<Factura>>("/api/v1/facturas?limit=50");
   const rows = data?.items ?? [];
 
   // ── generar desde remisiones ──
@@ -163,20 +156,7 @@ export default function FacturasPage() {
         actions={canWrite ? <Button onClick={openGen}><Plus size={16} /> Generar desde remisiones</Button> : undefined}
       />
 
-      <div className="mb-4 flex flex-wrap gap-2">
-        <Select value={fEstado} onChange={(e) => setFEstado(e.target.value)} className="max-w-[10rem]">
-          <option value="">Todos los estados</option>
-          <option value="BORRADOR">Borrador</option>
-          <option value="TIMBRADA">Timbrada</option>
-          <option value="CANCELADA">Cancelada</option>
-        </Select>
-        <Select value={fCliente} onChange={(e) => setFCliente(e.target.value)} className="max-w-xs">
-          <option value="">Todos los clientes</option>
-          {clientes.map((c) => <option key={c.id} value={c.id}>{c.legal_name}</option>)}
-        </Select>
-      </div>
-
-      <DataTable columns={columns} rows={rows} loading={loading} error={error} empty="Sin facturas" />
+      <DataTableSmart columns={columns} rows={rows} loading={loading} error={error} empty="Sin facturas" storageKey="facturas" />
 
       {/* generar */}
       <Modal open={genOpen} onClose={() => setGenOpen(false)} title="Generar factura desde remisiones" wide
@@ -230,22 +210,18 @@ export default function FacturasPage() {
               {detalle.uuid && <div><span className="text-muted">UUID:</span> <span className="font-mono text-xs">{detalle.uuid}</span></div>}
               {detalle.fecha_timbrado && <div><span className="text-muted">Timbrada:</span> {fmtDateTime(detalle.fecha_timbrado)}</div>}
             </div>
-            <table className="w-full text-sm">
-              <thead><tr className="border-b border-border text-left text-xs text-muted">
-                <th className="py-1">Descripción</th><th className="text-right">Cant.</th><th className="text-right">P. unit.</th><th className="text-right">IVA</th><th className="text-right">Importe</th>
-              </tr></thead>
-              <tbody>
-                {detalle.lineas.map((l) => (
-                  <tr key={l.numero_linea} className="border-b border-border/50">
-                    <td className="py-1">{l.descripcion}</td>
-                    <td className="text-right tabular-nums">{l.cantidad}</td>
-                    <td className="text-right tabular-nums">{fmtMoney(l.valor_unitario)}</td>
-                    <td className="text-right tabular-nums">{fmtMoney(l.iva_importe)}</td>
-                    <td className="text-right tabular-nums">{fmtMoney(l.importe)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <DataTable
+              rows={detalle.lineas}
+              rowKey={(l) => l.numero_linea}
+              empty="Sin conceptos"
+              columns={[
+                { header: "Descripción", cell: (l) => l.descripcion },
+                { header: "Cant.", className: "text-right tabular-nums", cell: (l) => l.cantidad },
+                { header: "P. unit.", className: "text-right tabular-nums", cell: (l) => fmtMoney(l.valor_unitario) },
+                { header: "IVA", className: "text-right tabular-nums", cell: (l) => fmtMoney(l.iva_importe) },
+                { header: "Importe", className: "text-right tabular-nums", cell: (l) => fmtMoney(l.importe) },
+              ]}
+            />
             <div className="mt-3 flex flex-col items-end gap-1 text-sm">
               <div className="flex gap-4"><span className="text-muted">Subtotal</span><span className="tabular-nums">{fmtMoney(detalle.subtotal)}</span></div>
               <div className="flex gap-4"><span className="text-muted">IVA</span><span className="tabular-nums">{fmtMoney(detalle.iva_trasladado)}</span></div>
