@@ -14,6 +14,7 @@ from .api.v1 import (
     clientes,
     conversiones,
     correo,
+    empresa,
     esquemas_impuesto,
     facturas,
     inventario,
@@ -102,3 +103,5 @@ app.include_router(precios.router, prefix="/api/v1")
 app.include_router(series.router, prefix="/api/v1")
 # correo SMTP del tenant
 app.include_router(correo.router, prefix="/api/v1")
+# empresa / emisor — datos fiscales del tenant + CSD
+app.include_router(empresa.router, prefix="/api/v1")

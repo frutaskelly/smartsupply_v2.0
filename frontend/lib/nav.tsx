@@ -59,6 +59,7 @@ export const NAV: NavSection[] = [
   {
     section: "Ajustes",
     items: [
+      { label: "Empresa", href: "/ajustes/empresa", perm: "menu:ajustes.usuarios", icon: Building2 },
       { label: "Series y folios", href: "/ajustes/series", perm: "menu:series", icon: Hash },
       { label: "Correo", href: "/ajustes/correo", perm: "menu:ajustes.usuarios", icon: Mail },
       { label: "Usuarios", href: "/ajustes/usuarios", perm: "menu:ajustes.usuarios", icon: UserCog },
