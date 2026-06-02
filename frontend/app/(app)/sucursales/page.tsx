@@ -1,31 +1,27 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { Building2, Calculator, Plus, Trash2 } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Plus, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { DataTableSmart } from "@/components/ui/DataTableSmart";
-import { EmptyState } from "@/components/ui/EmptyState";
+import { Modal } from "@/components/ui/Modal";
 import { Field, Input, Select } from "@/components/ui/Field";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { Badge } from "@/components/ui/Badge";
 import { useToast } from "@/components/ui/Toast";
 import { ApiError, apiFetch } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import { fmtMoney } from "@/lib/format";
 import { useMutation, useResource, type Page } from "@/lib/hooks";
-import type { Cliente, Cotizacion, ListaPrecios, PrecioOverride, Producto, Serie, Sucursal } from "@/lib/types";
+import type { Cliente, ListaPrecios, PrecioOverride, Producto, Serie, Sucursal } from "@/lib/types";
 
+// Permisos de escritura (igual que la versión previa de esta página):
+//  - alta/baja de sucursales -> cliente:gestionar
+//  - precios especiales (overrides) -> lista_precios:gestionar
 const WRITE_SUC = "cliente:gestionar";
 const WRITE_OVR = "lista_precios:gestionar";
-
-const ORIGEN_LABEL: Record<string, string> = {
-  override_sucursal: "Precio especial de la sucursal",
-  override_cliente: "Precio especial del cliente",
-  lista_sucursal: "Lista de la sucursal",
-  lista_cliente: "Lista del cliente",
-  lista_base: "Lista base (público)",
-};
 
 export default function SucursalesPage() {
   const { me } = useAuth();
@@ -34,23 +30,69 @@ export default function SucursalesPage() {
   const canOvr = can(me, WRITE_OVR);
   const { post, del } = useMutation();
 
-  const clientesRes = useResource<Page<Cliente>>("/api/v1/clientes?limit=200");
-  const productosRes = useResource<Page<Producto>>("/api/v1/productos?limit=200");
+  // ── catálogos (una sola carga) ──
+  const clientesRes = useResource<Page<Cliente>>("/api/v1/clientes?limit=500");
+  const sucursalesRes = useResource<Page<Sucursal>>("/api/v1/sucursales?limit=1000");
+  const productosRes = useResource<Page<Producto>>("/api/v1/productos?limit=1000");
   const listasRes = useResource<Page<ListaPrecios>>("/api/v1/listas-precios?limit=200");
   const seriesFacRes = useResource<Page<Serie>>("/api/v1/series?tipo_documento=FACTURA&activa=true&limit=200");
   const seriesRemRes = useResource<Page<Serie>>("/api/v1/series?tipo_documento=REMISION&activa=true&limit=200");
+
   const clientes = clientesRes.data?.items ?? [];
+  const allSucursales = sucursalesRes.data?.items ?? [];
   const productos = productosRes.data?.items ?? [];
   const listas = listasRes.data?.items ?? [];
   const seriesFac = seriesFacRes.data?.items ?? [];
   const seriesRem = seriesRemRes.data?.items ?? [];
-  const prodName = useMemo(() => Object.fromEntries(productos.map((p) => [p.id, p.nombre])), [productos]);
-  const listaName = useMemo(() => Object.fromEntries(listas.map((l) => [l.id, l.nombre])), [listas]);
-  const prodById = useMemo(() => Object.fromEntries(productos.map((p) => [p.id, p])), [productos]);
 
-  // Presentaciones válidas de un producto (con su default al frente). El precio
-  // se guarda por presentación, así que cotizar con una que no existe (p. ej.
-  // "KILO" en un producto que se vende por "PIEZA") no resuelve precio.
+  const prodName = useMemo(() => Object.fromEntries(productos.map((p) => [p.id, p.nombre])), [productos]);
+  const prodById = useMemo(() => Object.fromEntries(productos.map((p) => [p.id, p])), [productos]);
+  const listaName = useMemo(() => Object.fromEntries(listas.map((l) => [l.id, l.nombre])), [listas]);
+  // serie_factura_id -> codigo (para la columna "Serie" del cliente)
+  const serieCodigo = useMemo(
+    () => Object.fromEntries([...seriesFac, ...seriesRem].map((s) => [s.id, s.codigo])),
+    [seriesFac, seriesRem],
+  );
+
+  // # sucursales por cliente (agrupando la carga única de sucursales)
+  const sucPorCliente = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const s of allSucursales) m[s.cliente_id] = (m[s.cliente_id] ?? 0) + 1;
+    return m;
+  }, [allSucursales]);
+
+  // ── detalle por cliente, cargado bajo demanda al expandir la fila ──
+  type Detalle = { sucursales: Sucursal[]; overrides: PrecioOverride[]; loading: boolean };
+  const [detalle, setDetalle] = useState<Record<string, Detalle>>({});
+
+  async function loadDetalle(clienteId: string) {
+    setDetalle((d) => ({ ...d, [clienteId]: { sucursales: d[clienteId]?.sucursales ?? [], overrides: d[clienteId]?.overrides ?? [], loading: true } }));
+    try {
+      const [sucs, ovrs] = await Promise.all([
+        apiFetch<Page<Sucursal>>(`/api/v1/sucursales?cliente_id=${clienteId}&limit=200`),
+        apiFetch<Page<PrecioOverride>>(`/api/v1/precios/overrides?cliente_id=${clienteId}&limit=200`),
+      ]);
+      setDetalle((d) => ({ ...d, [clienteId]: { sucursales: sucs.items, overrides: ovrs.items, loading: false } }));
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudo cargar el detalle del cliente");
+      setDetalle((d) => ({ ...d, [clienteId]: { sucursales: [], overrides: [], loading: false } }));
+    }
+  }
+
+  function reloadDetalle(clienteId: string) {
+    loadDetalle(clienteId);
+    sucursalesRes.reload(); // refresca el conteo "# Sucursales"
+  }
+
+  // ── modales de alta ──
+  const emptySuc = { nombre: "", contacto: "", telefono: "", lista_precios_id: "", serie_factura_id: "", serie_remision_id: "" };
+  const [sucModal, setSucModal] = useState<{ clienteId: string } | null>(null);
+  const [nuevaSuc, setNuevaSuc] = useState(emptySuc);
+
+  const emptyOvr = { producto_id: "", presentacion: "", sucursal_id: "", precio_unitario: "" };
+  const [ovrModal, setOvrModal] = useState<{ clienteId: string } | null>(null);
+  const [nuevoOvr, setNuevoOvr] = useState(emptyOvr);
+
   function presentacionesDe(productoId: string): string[] {
     const p = prodById[productoId];
     if (!p) return [];
@@ -58,278 +100,284 @@ export default function SucursalesPage() {
     const def = p.presentacion_default ?? p.unidad_base;
     return def && keys.includes(def) ? [def, ...keys.filter((k) => k !== def)] : keys;
   }
-  function presentacionDefault(productoId: string): string {
-    return presentacionesDe(productoId)[0] ?? "";
+
+  function openSucModal(clienteId: string) {
+    setNuevaSuc(emptySuc);
+    setSucModal({ clienteId });
+  }
+  function openOvrModal(clienteId: string) {
+    setNuevoOvr(emptyOvr);
+    setOvrModal({ clienteId });
   }
 
-  const [clienteId, setClienteId] = useState("");
-  const [sucursales, setSucursales] = useState<Sucursal[]>([]);
-  const [overrides, setOverrides] = useState<PrecioOverride[]>([]);
-  const [scope, setScope] = useState("cliente"); // "cliente" | <sucursalId>
-
-  const [nuevaSuc, setNuevaSuc] = useState({ nombre: "", lista_precios_id: "", serie_factura_id: "", serie_remision_id: "" });
-  const [nuevoOvr, setNuevoOvr] = useState({ producto_id: "", presentacion: "KILO", precio_unitario: "" });
-
-  const sucName = useMemo(() => Object.fromEntries(sucursales.map((s) => [s.id, s.nombre])), [sucursales]);
-
-  async function loadSucursales(cid: string) {
+  async function createSucursal() {
+    if (!sucModal) return;
+    if (!nuevaSuc.nombre.trim()) { toast.error("El nombre de la sucursal es obligatorio"); return; }
     try {
-      const r = await apiFetch<Page<Sucursal>>(`/api/v1/sucursales?cliente_id=${cid}&limit=200`);
-      setSucursales(r.items);
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "No se pudieron cargar las sucursales");
-    }
-  }
-  async function loadOverrides(cid: string, sc: string) {
-    try {
-      const q = sc === "cliente" ? `cliente_id=${cid}` : `sucursal_id=${sc}`;
-      const r = await apiFetch<Page<PrecioOverride>>(`/api/v1/precios/overrides?${q}&limit=200`);
-      setOverrides(r.items);
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "No se pudieron cargar los precios especiales");
-    }
-  }
-
-  useEffect(() => {
-    if (!clienteId) { setSucursales([]); setOverrides([]); return; }
-    setScope("cliente");
-    loadSucursales(clienteId);
-    loadOverrides(clienteId, "cliente");
-  }, [clienteId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  function changeScope(sc: string) {
-    setScope(sc);
-    if (clienteId) loadOverrides(clienteId, sc);
-  }
-
-  async function addSucursal() {
-    if (!nuevaSuc.nombre.trim()) { toast.error("Nombre de sucursal requerido"); return; }
-    try {
+      // codigo se autogenera en el backend (SUC-01, …): NO se envía.
       await post("/api/v1/sucursales", {
-        cliente_id: clienteId, nombre: nuevaSuc.nombre.trim(),
-        // El código se autogenera en el backend (SUC-01, SUC-02, …).
+        cliente_id: sucModal.clienteId,
+        nombre: nuevaSuc.nombre.trim(),
+        contacto: nuevaSuc.contacto.trim() || null,
+        telefono: nuevaSuc.telefono.trim() || null,
         lista_precios_id: nuevaSuc.lista_precios_id || null,
         serie_factura_id: nuevaSuc.serie_factura_id || null,
         serie_remision_id: nuevaSuc.serie_remision_id || null,
       });
       toast.success("Sucursal creada");
-      setNuevaSuc({ nombre: "", lista_precios_id: "", serie_factura_id: "", serie_remision_id: "" });
-      loadSucursales(clienteId);
+      reloadDetalle(sucModal.clienteId);
+      setSucModal(null);
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "No se pudo crear");
+      toast.error(e instanceof ApiError ? e.message : "No se pudo crear la sucursal");
     }
   }
-  async function delSucursal(s: Sucursal) {
+
+  async function delSucursal(clienteId: string, s: Sucursal) {
     try {
       await del(`/api/v1/sucursales/${s.id}`);
-      loadSucursales(clienteId);
-      if (scope === s.id) changeScope("cliente");
+      toast.success("Sucursal eliminada");
+      reloadDetalle(clienteId);
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo eliminar");
     }
   }
 
-  async function addOverride() {
+  async function createOverride() {
+    if (!ovrModal) return;
     if (!nuevoOvr.producto_id || !nuevoOvr.precio_unitario) { toast.error("Elige producto y precio"); return; }
     const body: Record<string, unknown> = {
       producto_id: nuevoOvr.producto_id,
       presentacion: nuevoOvr.presentacion.trim() || "KILO",
       precio_unitario: nuevoOvr.precio_unitario,
     };
-    if (scope === "cliente") body.cliente_id = clienteId;
-    else body.sucursal_id = scope;
+    // El backend exige exactamente uno: cliente_id XOR sucursal_id.
+    if (nuevoOvr.sucursal_id) body.sucursal_id = nuevoOvr.sucursal_id;
+    else body.cliente_id = ovrModal.clienteId;
     try {
       await post("/api/v1/precios/overrides", body);
       toast.success("Precio especial agregado");
-      setNuevoOvr({ producto_id: "", presentacion: "KILO", precio_unitario: "" });
-      loadOverrides(clienteId, scope);
+      reloadDetalle(ovrModal.clienteId);
+      setOvrModal(null);
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "No se pudo agregar");
+      toast.error(e instanceof ApiError ? e.message : "No se pudo agregar el precio especial");
     }
   }
-  async function delOverride(o: PrecioOverride) {
+
+  async function delOverride(clienteId: string, o: PrecioOverride) {
     try {
       await del(`/api/v1/precios/overrides/${o.id}`);
-      loadOverrides(clienteId, scope);
+      toast.success("Precio especial eliminado");
+      reloadDetalle(clienteId);
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo eliminar");
     }
   }
 
-  // ── cotizador ──
-  const [cot, setCot] = useState({ producto_id: "", presentacion: "KILO", cantidad: "1", sucursal_id: "" });
-  const [cotRes, setCotRes] = useState<Cotizacion | null>(null);
-  async function cotizar() {
-    if (!cot.producto_id) { toast.error("Elige producto"); return; }
-    const p = new URLSearchParams({ producto_id: cot.producto_id, presentacion: cot.presentacion || "KILO", cantidad: cot.cantidad || "1" });
-    if (cot.sucursal_id) p.set("sucursal_id", cot.sucursal_id);
-    else if (clienteId) p.set("cliente_id", clienteId);
-    try {
-      setCotRes(await apiFetch<Cotizacion>(`/api/v1/precios/cotizar?${p.toString()}`));
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "No se pudo cotizar");
-    }
+  // ── columnas de la tabla principal (clientes) ──
+  const cols: Column<Cliente>[] = [
+    { header: "Razón social", cell: (c) => <span className="font-medium">{c.legal_name}</span>, sortable: true, sortValue: (c) => c.legal_name },
+    {
+      header: "# Sucursales",
+      className: "text-right tabular-nums",
+      cell: (c) => sucPorCliente[c.id] ?? 0,
+      sortable: true,
+      sortValue: (c) => sucPorCliente[c.id] ?? 0,
+    },
+    {
+      header: "Serie",
+      cell: (c) => (c.serie_factura_id && serieCodigo[c.serie_factura_id] ? <Badge tone="muted">{serieCodigo[c.serie_factura_id]}</Badge> : "—"),
+      sortValue: (c) => (c.serie_factura_id ? serieCodigo[c.serie_factura_id] ?? "" : ""),
+    },
+  ];
+
+  // ── panel expandible por cliente ──
+  function ExpandedCliente({ cliente }: { cliente: Cliente }) {
+    const d = detalle[cliente.id];
+    const sucs = d?.sucursales ?? [];
+    const ovrs = d?.overrides ?? [];
+
+    const sucCols: Column<Sucursal>[] = [
+      { header: "Sucursal", cell: (s) => <span className="font-medium">{s.nombre}</span> },
+      { header: "Código", cell: (s) => s.codigo ?? "—" },
+      { header: "Contacto", cell: (s) => s.contacto ?? "—" },
+      { header: "Teléfono", cell: (s) => s.telefono ?? "—" },
+      { header: "Lista propia", cell: (s) => (s.lista_precios_id ? listaName[s.lista_precios_id] ?? "—" : "(hereda del cliente)") },
+      ...(canSuc
+        ? [{
+            header: "", className: "text-right w-1",
+            cell: (s: Sucursal) => (
+              <button onClick={() => delSucursal(cliente.id, s)} className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-danger" aria-label="Eliminar sucursal"><Trash2 size={16} /></button>
+            ),
+          }]
+        : []),
+    ];
+
+    const ovrCols: Column<PrecioOverride>[] = [
+      { header: "Producto", cell: (o) => prodName[o.producto_id] ?? o.producto_id },
+      { header: "Present.", cell: (o) => o.presentacion },
+      { header: "Alcance", cell: (o) => (o.sucursal_id ? `Solo ${sucName(sucs, o.sucursal_id)}` : "Todo el cliente") },
+      { header: "Precio", className: "text-right tabular-nums", cell: (o) => fmtMoney(o.precio_unitario) },
+      ...(canOvr
+        ? [{
+            header: "", className: "text-right w-1",
+            cell: (o: PrecioOverride) => (
+              <button onClick={() => delOverride(cliente.id, o)} className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-danger" aria-label="Eliminar precio especial"><Trash2 size={16} /></button>
+            ),
+          }]
+        : []),
+    ];
+
+    return (
+      <div className="space-y-5 pt-2">
+        <section>
+          <div className="mb-2 flex items-center justify-between">
+            <h3 className="text-sm font-semibold">Sucursales</h3>
+            {canSuc && (
+              <Button variant="secondary" onClick={() => openSucModal(cliente.id)}><Plus size={15} /> Nueva sucursal</Button>
+            )}
+          </div>
+          <DataTable
+            columns={sucCols}
+            rows={sucs}
+            loading={d?.loading}
+            empty="Sin sucursales (las ventas usan el precio del cliente)"
+          />
+        </section>
+
+        <section>
+          <div className="mb-2 flex items-center justify-between">
+            <h3 className="text-sm font-semibold">Precios especiales</h3>
+            {canOvr && (
+              <Button variant="secondary" onClick={() => openOvrModal(cliente.id)}><Plus size={15} /> Precio especial</Button>
+            )}
+          </div>
+          <DataTable
+            columns={ovrCols}
+            rows={ovrs}
+            loading={d?.loading}
+            empty="Sin precios especiales para este cliente"
+          />
+        </section>
+      </div>
+    );
   }
 
-  const sucCols: Column<Sucursal>[] = [
-    { header: "Sucursal", cell: (s) => <span className="font-medium">{s.nombre}</span> },
-    { header: "Código", cell: (s) => s.codigo ?? "—" },
-    { header: "Lista propia", cell: (s) => (s.lista_precios_id ? listaName[s.lista_precios_id] ?? "—" : "(hereda del cliente)") },
-    {
-      header: "", className: "text-right w-1",
-      cell: (s) => canSuc ? (
-        <button onClick={() => delSucursal(s)} className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-danger" aria-label="Eliminar"><Trash2 size={16} /></button>
-      ) : null,
-    },
-  ];
-
-  const ovrCols: Column<PrecioOverride>[] = [
-    { header: "Producto", cell: (o) => prodName[o.producto_id] ?? o.producto_id },
-    { header: "Present.", cell: (o) => o.presentacion },
-    { header: "Precio", cell: (o) => fmtMoney(o.precio_unitario), className: "text-right" },
-    {
-      header: "", className: "text-right w-1",
-      cell: (o) => canOvr ? (
-        <button onClick={() => delOverride(o)} className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-danger" aria-label="Eliminar"><Trash2 size={16} /></button>
-      ) : null,
-    },
-  ];
+  const sucModalCliente = sucModal?.clienteId;
+  const ovrModalCliente = ovrModal?.clienteId;
+  const ovrModalSucursales = ovrModalCliente ? detalle[ovrModalCliente]?.sucursales ?? [] : [];
 
   return (
     <div>
-      <PageHeader title="Sucursales y precios" subtitle="Sucursales por cliente, precios especiales y cotizador en vivo." />
+      <PageHeader
+        title="Sucursales y precios por cliente"
+        subtitle="Cada cliente: sus sucursales de entrega y sus precios especiales negociados."
+      />
 
-      <div className="mb-4 max-w-md">
-        <Field label="Cliente">
-          <Select value={clienteId} onChange={(e) => setClienteId(e.target.value)}>
-            <option value="">— Elige un cliente —</option>
-            {clientes.map((c) => <option key={c.id} value={c.id}>{c.legal_name}</option>)}
-          </Select>
-        </Field>
-      </div>
+      <DataTableSmart
+        columns={cols}
+        rows={clientes}
+        loading={clientesRes.loading}
+        error={clientesRes.error}
+        empty="Sin clientes"
+        storageKey="sucursales"
+        rowKey={(c) => c.id}
+        searchPlaceholder="Buscar cliente…"
+        renderExpanded={(c) => <ExpandedCliente cliente={c} />}
+        onRowExpand={(c) => { if (!detalle[c.id]) loadDetalle(c.id); }}
+      />
 
-      {!clienteId ? (
-        <EmptyState
-          icon={<Building2 size={28} />}
-          title="Elige un cliente"
-          hint="Selecciona un cliente para administrar sus sucursales y precios especiales."
-        />
-      ) : (
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          {/* Sucursales */}
-          <section className="rounded-xl border border-border p-4">
-            <h2 className="mb-3 text-sm font-semibold">Sucursales (entrega)</h2>
-            {canSuc && (
-              <div className="mb-3 space-y-2">
-                <Field label="Nombre">
-                  <Input
-                    placeholder="Ej. Matriz Centro"
-                    value={nuevaSuc.nombre}
-                    onChange={(e) => setNuevaSuc({ ...nuevaSuc, nombre: e.target.value })}
-                  />
-                </Field>
-                <div className="grid grid-cols-2 gap-2">
-                  <Field label="Serie de factura">
-                    <Select value={nuevaSuc.serie_factura_id} onChange={(e) => setNuevaSuc({ ...nuevaSuc, serie_factura_id: e.target.value })}>
-                      <option value="">(usa la del cliente / default)</option>
-                      {seriesFac.map((s) => <option key={s.id} value={s.id}>{s.codigo}{s.nombre ? ` · ${s.nombre}` : ""}</option>)}
-                    </Select>
-                  </Field>
-                  <Field label="Serie de remisión">
-                    <Select value={nuevaSuc.serie_remision_id} onChange={(e) => setNuevaSuc({ ...nuevaSuc, serie_remision_id: e.target.value })}>
-                      <option value="">(usa la del cliente / default)</option>
-                      {seriesRem.map((s) => <option key={s.id} value={s.id}>{s.codigo}{s.nombre ? ` · ${s.nombre}` : ""}</option>)}
-                    </Select>
-                  </Field>
-                </div>
-                <div className="flex items-end gap-2">
-                  <div className="flex-1">
-                    <Field label="Lista propia">
-                      <Select value={nuevaSuc.lista_precios_id} onChange={(e) => setNuevaSuc({ ...nuevaSuc, lista_precios_id: e.target.value })}>
-                        <option value="">(hereda del cliente)</option>
-                        {listas.map((l) => <option key={l.id} value={l.id}>{l.nombre}</option>)}
-                      </Select>
-                    </Field>
-                  </div>
-                  <Button onClick={addSucursal}><Plus size={16} /> Nueva sucursal</Button>
-                </div>
-                <p className="text-xs text-muted">El código se genera automáticamente (SUC-01, SUC-02, …). La serie de la sucursal gana sobre la del cliente.</p>
-              </div>
-            )}
-            <DataTableSmart columns={sucCols} rows={sucursales} empty="Sin sucursales (las ventas usan el precio del cliente)" storageKey="sucursales" />
-          </section>
-
-          {/* Precios especiales (overrides) */}
-          <section className="rounded-xl border border-border p-4">
-            <h2 className="mb-1 text-sm font-semibold">Precios especiales</h2>
-            <div className="mb-3 max-w-xs">
-              <Select value={scope} onChange={(e) => changeScope(e.target.value)}>
-                <option value="cliente">Para todo el cliente</option>
-                {sucursales.map((s) => <option key={s.id} value={s.id}>Solo en {s.nombre}</option>)}
+      {/* Modal: nueva sucursal */}
+      <Modal
+        open={!!sucModal}
+        onClose={() => setSucModal(null)}
+        title="Nueva sucursal"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setSucModal(null)}>Cancelar</Button>
+            <Button onClick={createSucursal}>Crear sucursal</Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <Field label="Nombre" required>
+            <Input placeholder="Ej. Matriz Centro" value={nuevaSuc.nombre} onChange={(e) => setNuevaSuc({ ...nuevaSuc, nombre: e.target.value })} autoFocus />
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Contacto">
+              <Input value={nuevaSuc.contacto} onChange={(e) => setNuevaSuc({ ...nuevaSuc, contacto: e.target.value })} />
+            </Field>
+            <Field label="Teléfono">
+              <Input value={nuevaSuc.telefono} onChange={(e) => setNuevaSuc({ ...nuevaSuc, telefono: e.target.value })} />
+            </Field>
+          </div>
+          <Field label="Lista de precios propia" hint="Si se deja vacío, hereda la del cliente.">
+            <Select value={nuevaSuc.lista_precios_id} onChange={(e) => setNuevaSuc({ ...nuevaSuc, lista_precios_id: e.target.value })}>
+              <option value="">(hereda del cliente)</option>
+              {listas.map((l) => <option key={l.id} value={l.id}>{l.nombre}</option>)}
+            </Select>
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Serie de factura" hint="Gana sobre la del cliente.">
+              <Select value={nuevaSuc.serie_factura_id} onChange={(e) => setNuevaSuc({ ...nuevaSuc, serie_factura_id: e.target.value })}>
+                <option value="">(usa la del cliente / default)</option>
+                {seriesFac.map((s) => <option key={s.id} value={s.id}>{s.codigo}{s.nombre ? ` · ${s.nombre}` : ""}</option>)}
               </Select>
-            </div>
-            {canOvr && (
-              <div className="mb-3 grid grid-cols-2 items-end gap-2 sm:grid-cols-4">
-                <div className="col-span-2"><Field label="Producto">
-                  <Select value={nuevoOvr.producto_id} onChange={(e) => setNuevoOvr({ ...nuevoOvr, producto_id: e.target.value, presentacion: presentacionDefault(e.target.value) })}>
-                    <option value="">— Elige —</option>
-                    {productos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
-                  </Select>
-                </Field></div>
-                <Field label="Present.">
-                  <Select value={nuevoOvr.presentacion} onChange={(e) => setNuevoOvr({ ...nuevoOvr, presentacion: e.target.value })} disabled={!nuevoOvr.producto_id}>
-                    {presentacionesDe(nuevoOvr.producto_id).map((pr) => <option key={pr} value={pr}>{pr}</option>)}
-                  </Select>
-                </Field>
-                <Field label="Precio">
-                  <div className="flex gap-1">
-                    <Input type="number" step="0.0001" value={nuevoOvr.precio_unitario} onChange={(e) => setNuevoOvr({ ...nuevoOvr, precio_unitario: e.target.value })} />
-                    <Button onClick={addOverride}><Plus size={16} /></Button>
-                  </div>
-                </Field>
-              </div>
-            )}
-            <DataTable columns={ovrCols} rows={overrides} empty="Sin precios especiales en este alcance" />
-          </section>
-
-          {/* Cotizador */}
-          <section className="rounded-xl border border-border p-4 lg:col-span-2">
-            <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold"><Calculator size={15} /> Cotizador (precio resuelto)</h2>
-            <div className="grid grid-cols-2 items-end gap-2 sm:grid-cols-5">
-              <div className="col-span-2"><Field label="Producto">
-                <Select value={cot.producto_id} onChange={(e) => setCot({ ...cot, producto_id: e.target.value, presentacion: presentacionDefault(e.target.value) })}>
-                  <option value="">— Elige —</option>
-                  {productos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
-                </Select>
-              </Field></div>
-              <Field label="Present.">
-                <Select value={cot.presentacion} onChange={(e) => setCot({ ...cot, presentacion: e.target.value })} disabled={!cot.producto_id}>
-                  {presentacionesDe(cot.producto_id).map((pr) => <option key={pr} value={pr}>{pr}</option>)}
-                </Select>
-              </Field>
-              <Field label="Cantidad"><Input type="number" value={cot.cantidad} onChange={(e) => setCot({ ...cot, cantidad: e.target.value })} /></Field>
-              <Field label="Sucursal">
-                <div className="flex gap-1">
-                  <Select value={cot.sucursal_id} onChange={(e) => setCot({ ...cot, sucursal_id: e.target.value })}>
-                    <option value="">(cliente)</option>
-                    {sucursales.map((s) => <option key={s.id} value={s.id}>{s.nombre}</option>)}
-                  </Select>
-                  <Button onClick={cotizar}>Cotizar</Button>
-                </div>
-              </Field>
-            </div>
-            {cotRes && (
-              <div className="mt-3 rounded-lg bg-surface-2 px-4 py-3 text-sm">
-                {cotRes.precio != null ? (
-                  <>Precio: <b>{fmtMoney(cotRes.precio)}</b> · origen: <b>{ORIGEN_LABEL[cotRes.origen ?? ""] ?? cotRes.origen ?? "—"}</b></>
-                ) : (
-                  <span className="text-danger">Sin precio resoluble (configura una lista u override).</span>
-                )}
-              </div>
-            )}
-          </section>
+            </Field>
+            <Field label="Serie de remisión">
+              <Select value={nuevaSuc.serie_remision_id} onChange={(e) => setNuevaSuc({ ...nuevaSuc, serie_remision_id: e.target.value })}>
+                <option value="">(usa la del cliente / default)</option>
+                {seriesRem.map((s) => <option key={s.id} value={s.id}>{s.codigo}{s.nombre ? ` · ${s.nombre}` : ""}</option>)}
+              </Select>
+            </Field>
+          </div>
+          <p className="text-xs text-muted">El código (SUC-01, SUC-02, …) se genera automáticamente.</p>
         </div>
-      )}
+      </Modal>
+
+      {/* Modal: precio especial */}
+      <Modal
+        open={!!ovrModal}
+        onClose={() => setOvrModal(null)}
+        title="Nuevo precio especial"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setOvrModal(null)}>Cancelar</Button>
+            <Button onClick={createOverride}>Agregar precio</Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <Field label="Producto" required>
+            <Select
+              value={nuevoOvr.producto_id}
+              onChange={(e) => setNuevoOvr({ ...nuevoOvr, producto_id: e.target.value, presentacion: presentacionesDe(e.target.value)[0] ?? "" })}
+            >
+              <option value="">— Elige un producto —</option>
+              {productos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+            </Select>
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Presentación">
+              <Select value={nuevoOvr.presentacion} onChange={(e) => setNuevoOvr({ ...nuevoOvr, presentacion: e.target.value })} disabled={!nuevoOvr.producto_id}>
+                {presentacionesDe(nuevoOvr.producto_id).map((pr) => <option key={pr} value={pr}>{pr}</option>)}
+              </Select>
+            </Field>
+            <Field label="Precio" required>
+              <Input type="number" step="0.0001" value={nuevoOvr.precio_unitario} onChange={(e) => setNuevoOvr({ ...nuevoOvr, precio_unitario: e.target.value })} />
+            </Field>
+          </div>
+          <Field label="Alcance" hint="Aplica a todo el cliente o solo a una de sus sucursales.">
+            <Select value={nuevoOvr.sucursal_id} onChange={(e) => setNuevoOvr({ ...nuevoOvr, sucursal_id: e.target.value })}>
+              <option value="">Todo el cliente</option>
+              {ovrModalSucursales.map((s) => <option key={s.id} value={s.id}>Solo {s.nombre}</option>)}
+            </Select>
+          </Field>
+        </div>
+      </Modal>
     </div>
   );
+}
+
+function sucName(sucs: Sucursal[], id: string): string {
+  return sucs.find((s) => s.id === id)?.nombre ?? "sucursal";
 }
