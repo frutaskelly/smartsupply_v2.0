@@ -38,7 +38,7 @@ def list_clientes(
     q: Optional[str] = Query(default=None, max_length=254),
     tipo: Optional[str] = Query(default=None, max_length=20),
     status_: Optional[str] = Query(default=None, alias="status", max_length=20),
-    limit: int = Query(default=50, ge=1, le=200),
+    limit: int = Query(default=50, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_READ)),
