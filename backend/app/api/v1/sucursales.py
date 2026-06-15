@@ -42,7 +42,7 @@ def _generate_codigo(db: Session, tenant_id, cliente_id) -> str:
 @router.get("", response_model=Page[SucursalOut])
 def list_sucursales(
     cliente_id: Optional[UUID] = Query(default=None),
-    limit: int = Query(default=50, ge=1, le=200),
+    limit: int = Query(default=50, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_READ)),

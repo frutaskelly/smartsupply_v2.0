@@ -139,6 +139,40 @@ class FacturamaClient:
                 raise FacturamaError(f"validar_rfc failed: {r.status_code} {r.text[:500]}")
             return r.json()
 
+    # ─── CSD (sellos digitales) — multi-emisor / api-lite ─────────────────
+    def subir_csd(
+        self, rfc: str, certificate_b64: str, private_key_b64: str, password: str
+    ) -> dict:
+        """Sube el CSD del emisor a Facturama (multi-emisor).
+
+        POST /api-lite/csds con el .cer y .key en base64 + contraseña de la
+        llave privada. Levanta FacturamaError si la respuesta es >=400.
+        """
+        body = {
+            "Rfc": rfc,
+            "Certificate": certificate_b64,
+            "PrivateKey": private_key_b64,
+            "PrivateKeyPassword": password,
+        }
+        with self._client() as c:
+            r = c.post("/api-lite/csds", json=body)
+            if r.status_code >= 400:
+                log.error("Facturama /api-lite/csds %s | RESPONSE=%s", r.status_code, r.text[:1000])
+                raise FacturamaError(f"subir_csd failed: {r.status_code} {r.text[:500]}")
+            return r.json()
+
+    def listar_csds(self) -> list:
+        """Lista los CSD cargados en Facturama. [] si error o no 200."""
+        try:
+            with self._client() as c:
+                r = c.get("/api-lite/csds")
+                if r.status_code != 200:
+                    return []
+                data = r.json()
+                return data if isinstance(data, list) else []
+        except (FacturamaError, Exception):  # noqa: BLE001 — listado tolerante
+            return []
+
     def download_pdf(self, cfdi_id: str) -> bytes:
         with self._client() as c:
             r = c.get(f"/cfdi/pdf/issued/{cfdi_id}")

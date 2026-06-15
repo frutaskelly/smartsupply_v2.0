@@ -13,10 +13,10 @@ from typing import List
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from ...core.db import get_db
-from ...core.rbac import AuthContext, get_tenant_db, require_permission
+from ...core.rbac import AuthContext, get_tenant_db, invalidate_auth_cache, require_permission
 from ...models import Membership, Role, User
 from ...schemas.membership import (
     CambiarPasswordIn,
@@ -46,7 +46,12 @@ def list_memberships(
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
-    rows = db.query(Membership).order_by(Membership.created_at).all()
+    rows = (
+        db.query(Membership)
+        .options(joinedload(Membership.user), joinedload(Membership.role))
+        .order_by(Membership.created_at)
+        .all()
+    )
     return [_m_out(m) for m in rows]
 
 
@@ -80,6 +85,7 @@ def update_membership(
         setattr(m, key, value)
     db.flush()
     db.refresh(m)
+    invalidate_auth_cache()  # cambio de rol/estado → refresca permisos cacheados
     return _m_out(m)
 
 
@@ -97,6 +103,7 @@ def delete_membership(
         )
     db.delete(m)
     db.flush()
+    invalidate_auth_cache()  # membresía eliminada → revoca permisos cacheados
     return None
 
 
@@ -112,7 +119,22 @@ def crear_usuario(
         raise HTTPException(422, "Rol inválido")
     email = payload.email.strip().lower()
     user = db.query(User).filter(User.email == email).one_or_none()
-    if user is None:
+
+    if user is not None:
+        # Usuario ya existente (puede pertenecer a OTRA empresa). Validamos el
+        # duplicado de membresía ANTES de crear nada y NO tocamos su contraseña:
+        # resetearla afectaría a su cuenta global / a otra empresa. Para cambiar
+        # contraseñas de miembros existentes está el endpoint /{id}/password.
+        dup = (
+            db.query(Membership)
+            .filter(Membership.tenant_id == ctx.tenant_id, Membership.user_id == user.id)
+            .one_or_none()
+        )
+        if dup is not None:
+            raise HTTPException(409, "Ese usuario ya es miembro de esta empresa")
+    else:
+        # Usuario nuevo: creamos la cuenta de Auth (al final, para no dejar una
+        # cuenta huérfana si algo falla antes del commit).
         if not supabase_admin.configured():
             raise HTTPException(503, "Supabase no está configurado para crear usuarios")
         try:
@@ -122,24 +144,12 @@ def crear_usuario(
         user = User(email=email, full_name=payload.full_name, auth_user_id=auth_id)
         db.add(user)
         db.flush()
-    else:
-        # usuario existente: si tiene cuenta auth, actualiza su contraseña
-        if user.auth_user_id:
-            try:
-                supabase_admin.set_password(user.auth_user_id, payload.password)
-            except supabase_admin.SupabaseAdminError:
-                pass
-    dup = (
-        db.query(Membership)
-        .filter(Membership.tenant_id == ctx.tenant_id, Membership.user_id == user.id)
-        .one_or_none()
-    )
-    if dup is not None:
-        raise HTTPException(409, "Ese usuario ya es miembro de esta empresa")
+
     m = Membership(tenant_id=ctx.tenant_id, user_id=user.id, role_id=payload.role_id, active=True)
     db.add(m)
     db.commit()
     db.refresh(m)
+    invalidate_auth_cache()  # nueva membresía → refresca permisos cacheados
     return _m_out(m)
 
 

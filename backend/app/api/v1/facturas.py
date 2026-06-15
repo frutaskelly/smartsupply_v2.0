@@ -42,6 +42,7 @@ from ...schemas.factura import (
 from ...services.cfdi import build_payload
 from ...services.facturama import FacturamaClient, FacturamaError
 from ...services.fiscal import calcular_linea, totales
+from ...services.onboarding import compute_status
 from ...services.inventario import build_movimiento, presentacion_factor, presentacion_sat
 from ...services.series import consumir_folio, resolver_serie, siguiente_folio
 from ._helpers import get_or_404, paginate
@@ -201,51 +202,53 @@ def factura_desde_remisiones(
     )
     db.add(factura); db.flush()
 
-    calc_lineas = []
-    numero = 0
+    # Reúne las líneas de todas las remisiones; respeta peso variable/catch-weight.
+    specs: list[dict] = []
     for r in rems:
         for ln in r.lineas:
-            numero += 1
             prod = productos.get(ln.producto_id)
             esq = esquemas.get(prod.esquema_impuesto_id) if prod and prod.esquema_impuesto_id else None
             importe = Decimal(ln.importe)
-
-            # Cantidad/unidad/valor a facturar (respeta peso variable / catch-weight).
             if prod and prod.peso_variable and ln.cantidad_surtida and Decimal(ln.cantidad_surtida) > 0:
                 cantidad = Decimal(ln.cantidad_surtida)            # unidades base reales
                 clave_unidad = prod.unidad_sat
-                valor_unitario = (importe / cantidad) if cantidad else Decimal(ln.precio_unitario)
             else:
                 cantidad = Decimal(ln.cantidad_solicitada)
                 clave_unidad = presentacion_sat(prod, ln.presentacion) or (prod.unidad_sat if prod else "H87")
-                valor_unitario = Decimal(ln.precio_unitario)
-
-            iva_tasa = esq.iva_tasa if esq else (prod.iva_tasa if prod else ZERO)
-            iva_exento = bool(esq.iva_exento) if esq else False
-            tipo_ieps = esq.tipo_ieps if esq else None
-            ieps_tasa = esq.ieps_tasa if esq else ZERO
-            ieps_cuota = esq.ieps_cuota if esq else ZERO
-            ret_iva_tasa = esq.retencion_iva_tasa if esq else ZERO
-            ret_isr_tasa = esq.retencion_isr_tasa if esq else ZERO
-            litros = (cantidad * Decimal(prod.contenido_litros)) if (prod and prod.contenido_litros) else ZERO
-
-            calc = calcular_linea(
-                importe, iva_tasa=iva_tasa, iva_exento=iva_exento,
-                tipo_ieps=tipo_ieps, ieps_tasa=ieps_tasa, ieps_cuota=ieps_cuota,
-                litros_totales=litros, ret_iva_tasa=ret_iva_tasa, ret_isr_tasa=ret_isr_tasa,
-            )
-            calc_lineas.append(calc)
-            db.add(LineaFactura(
-                tenant_id=ctx.tenant_id, factura_id=factura.id, numero_linea=numero,
-                producto_id=ln.producto_id,
-                clave_prod_serv=(prod.clave_sat if prod else "01010101"),
-                clave_unidad=clave_unidad, descripcion=(prod.nombre if prod else "Producto"),
-                cantidad=cantidad, valor_unitario=valor_unitario, importe=importe, objeto_imp="02",
-                iva_tasa=calc["iva_tasa"], iva_importe=calc["iva_importe"],
-                ieps_tipo=calc["ieps_tipo"], ieps_valor=calc["ieps_valor"], ieps_importe=calc["ieps_importe"],
-                ret_iva_importe=calc["ret_iva_importe"], ret_isr_importe=calc["ret_isr_importe"],
-            ))
+            specs.append({"producto_id": ln.producto_id, "prod": prod, "esq": esq,
+                          "cantidad": cantidad, "clave_unidad": clave_unidad, "importe": importe})
         r.factura_id = factura.id
+
+    # agrupar_productos: suma cantidad/importe de líneas con mismo producto+unidad.
+    if payload.agrupar_productos:
+        merged: dict = {}
+        order: list = []
+        for s in specs:
+            k = (s["producto_id"], s["clave_unidad"])
+            if k not in merged:
+                merged[k] = dict(s); order.append(k)
+            else:
+                merged[k]["cantidad"] += s["cantidad"]
+                merged[k]["importe"] += s["importe"]
+        specs = [merged[k] for k in order]
+
+    calc_lineas = []
+    for numero, s in enumerate(specs, start=1):
+        prod, esq = s["prod"], s["esq"]
+        importe, cantidad, clave_unidad = s["importe"], s["cantidad"], s["clave_unidad"]
+        valor_unitario = (importe / cantidad).quantize(Decimal("0.000001")) if cantidad else ZERO
+        calc = _fiscal_calc(prod, esq, importe, cantidad)
+        calc_lineas.append(calc)
+        db.add(LineaFactura(
+            tenant_id=ctx.tenant_id, factura_id=factura.id, numero_linea=numero,
+            producto_id=s["producto_id"],
+            clave_prod_serv=(prod.clave_sat if prod else "01010101"),
+            clave_unidad=clave_unidad, descripcion=(prod.nombre if prod else "Producto"),
+            cantidad=cantidad, valor_unitario=valor_unitario, importe=importe, objeto_imp="02",
+            iva_tasa=calc["iva_tasa"], iva_importe=calc["iva_importe"],
+            ieps_tipo=calc["ieps_tipo"], ieps_valor=calc["ieps_valor"], ieps_importe=calc["ieps_importe"],
+            ret_iva_importe=calc["ret_iva_importe"], ret_isr_importe=calc["ret_isr_importe"],
+        ))
 
     tot = totales(calc_lineas)
     factura.subtotal = tot["subtotal"]
@@ -357,6 +360,21 @@ def timbrar_factura(
     client = FacturamaClient.from_settings(settings)
     if not client.configured:
         raise HTTPException(status_code=503, detail="Facturama no está configurado")
+
+    # Multi-emisor: el tenant debe estar listo (datos fiscales + su CSD cargado)
+    # antes de timbrar a su nombre. Mensaje accionable en vez del error críptico del PAC.
+    if bool(getattr(settings, "FACTURAMA_MULTIEMISOR", False)):
+        tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
+        estado = compute_status(client, tenant, multiemisor=True)
+        if not estado["listo_para_facturar"]:
+            faltan = [p["titulo"] for p in estado["pasos"] if not p["completo"]]
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "La empresa aún no está lista para facturar. Completa en "
+                    "Ajustes › Empresa: " + ", ".join(faltan) + "."
+                ),
+            )
 
     payload = build_payload(db, factura)
     try:

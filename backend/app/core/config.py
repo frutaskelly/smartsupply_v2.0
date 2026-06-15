@@ -52,9 +52,14 @@ class Settings(BaseSettings):
     # Envía Serie/Folio propios al PAC. Facturama SOLO acepta series dadas de alta
     # en la cuenta/sucursal; activar solo cuando esas series existan en Facturama.
     FACTURAMA_SEND_SERIE: bool = False
-    # Emisor opcional: si está vacío, Facturama usa el CSD por defecto de la cuenta
-    # (lo correcto en sandbox). En producción, fíjalo al RFC real cuyo CSD está
-    # cargado en Facturama.
+    # Multi-emisor: cada tenant timbra con SU propio RFC/CSD (subido a la cuenta
+    # maestra de Facturama). Con true, el emisor del CFDI se arma desde los datos
+    # fiscales del tenant. En producción multi-empresa: true.
+    FACTURAMA_MULTIEMISOR: bool = False
+    # Emisor opcional (override GLOBAL de un solo emisor): si está vacío y
+    # FACTURAMA_MULTIEMISOR=false, Facturama usa el CSD por defecto de la cuenta
+    # (lo correcto en sandbox). En producción single-emisor, fíjalo al RFC real cuyo
+    # CSD está cargado en Facturama.
     FACTURAMA_ISSUER_RFC: str = ""
     FACTURAMA_ISSUER_NAME: str = ""
     FACTURAMA_ISSUER_REGIMEN: str = ""
@@ -62,6 +67,18 @@ class Settings(BaseSettings):
 
     # ─── Cache ────────────────────────────────────────────────────────────────
     REDIS_URL: str = "redis://localhost:6379/0"
+
+    # ─── Signup público (anti-abuso) ────────────────────────────────────────────
+    # Kill-switch: false deshabilita el registro autoservicio (POST /registro).
+    SIGNUP_ENABLED: bool = True
+    # Máximo de registros por IP por hora (rate limit con Redis; fail-open).
+    SIGNUP_RATE_PER_HOUR: int = 5
+    # Captcha Cloudflare Turnstile: si hay secret, /registro exige y valida el token.
+    # Vacío = desactivado (dev/local). El site key va en el front (NEXT_PUBLIC_*).
+    TURNSTILE_SECRET: str = ""
+    # Exigir confirmación de correo antes de poder iniciar sesión. Requiere que el
+    # proyecto Supabase tenga "Confirm email" + envío de correo configurado.
+    SIGNUP_REQUIRE_EMAIL_CONFIRM: bool = False
 
     # ─── CORS (comma-separated) ─────────────────────────────────────────────────
     ALLOWED_ORIGINS: str = "http://localhost:3012,http://localhost:3000"

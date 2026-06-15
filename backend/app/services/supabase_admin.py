@@ -23,8 +23,10 @@ def _base() -> str:
     return settings.SUPABASE_URL.rstrip("/")
 
 
-def create_auth_user(email: str, password: str, full_name: Optional[str] = None) -> str:
-    body = {"email": email, "password": password, "email_confirm": True}
+def create_auth_user(
+    email: str, password: str, full_name: Optional[str] = None, email_confirm: bool = True
+) -> str:
+    body = {"email": email, "password": password, "email_confirm": email_confirm}
     if full_name:
         body["user_metadata"] = {"full_name": full_name}
     try:

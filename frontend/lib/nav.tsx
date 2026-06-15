@@ -59,8 +59,9 @@ export const NAV: NavSection[] = [
   {
     section: "Ajustes",
     items: [
+      { label: "Empresa", href: "/ajustes/empresa", perm: "membership:gestionar", icon: Building2 },
       { label: "Series y folios", href: "/ajustes/series", perm: "menu:series", icon: Hash },
-      { label: "Correo", href: "/ajustes/correo", perm: "menu:ajustes.usuarios", icon: Mail },
+      { label: "Correo", href: "/ajustes/correo", perm: "membership:gestionar", icon: Mail },
       { label: "Usuarios", href: "/ajustes/usuarios", perm: "menu:ajustes.usuarios", icon: UserCog },
       { label: "Roles", href: "/ajustes/roles", perm: "menu:ajustes.roles", icon: Shield },
       { label: "Sistema de diseño", href: "/ajustes/sistema-diseno", perm: "menu:configuraciones", icon: Palette },

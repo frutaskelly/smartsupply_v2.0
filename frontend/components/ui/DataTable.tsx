@@ -5,7 +5,7 @@ import { ArrowDown, ArrowUp, ChevronRight, ChevronsUpDown, Columns3, Download, E
 
 import { Alert } from "./Alert";
 import { EmptyState } from "./EmptyState";
-import { Select } from "./Field";
+import { Checkbox, Select } from "./Field";
 import { Spinner } from "./Spinner";
 
 export type Column<T> = {
@@ -132,6 +132,14 @@ export type DataTableProps<T> = {
   paginated?: boolean;
   pageSizeOptions?: number[];
   defaultPageSize?: number;
+  /** Activa una columna de casillas (checkbox) a la izquierda para seleccionar
+   *  filas. La selección persiste entre orden/búsqueda/paginación. */
+  selectable?: boolean;
+  /** Se llama con los OBJETOS de fila seleccionados cuando cambia la selección. */
+  onSelectionChange?: (rows: T[]) => void;
+  /** Al cambiar este valor, el componente limpia su selección interna (útil para
+   *  que el padre la resetee tras una acción en lote). */
+  selectionResetKey?: number | string;
 };
 
 export function DataTable<T>({
@@ -156,6 +164,9 @@ export function DataTable<T>({
   paginated,
   pageSizeOptions = [10, 25, 50, 100],
   defaultPageSize = 25,
+  selectable,
+  onSelectionChange,
+  selectionResetKey,
 }: DataTableProps<T>) {
   // ── identidad estable de cada columna ──
   const cols = useMemo(() => {
@@ -192,6 +203,16 @@ export function DataTable<T>({
     // while rendering a different component").
     if (willExpand) onRowExpand?.(row);
   }
+
+  // ── selección de filas (opt-in con `selectable`) ──
+  // Se guarda el `rowKey` de cada fila seleccionada (persiste entre orden,
+  // búsqueda y paginación, que solo cambian qué filas se muestran).
+  const keyOf = (row: T, index: number): string | number => (rowKey ? rowKey(row, index) : index);
+  const [selectedKeys, setSelectedKeys] = useState<Set<string | number>>(new Set());
+  // Limpia la selección cuando el padre cambia `selectionResetKey`.
+  useEffect(() => {
+    setSelectedKeys(new Set());
+  }, [selectionResetKey]);
 
   // ── columna de acciones (íconos por fila + menú ⋮ para reordenar/ocultar) ──
   const hasActions = !!actions && actions.length > 0;
@@ -319,6 +340,55 @@ export function DataTable<T>({
     });
   }, [sortedRows, search, cols]);
 
+  // ── selección: derivados + notificación al padre ──
+  // Objetos seleccionados: todas las filas (de `rows`) cuya clave esté marcada.
+  const selectedRows = useMemo(
+    () => rows.filter((row, i) => selectedKeys.has(keyOf(row, i))),
+    // keyOf depende de rowKey; rows y selectedKeys son las entradas reales.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rows, selectedKeys, rowKey],
+  );
+  // Notifica al padre cuando cambia la selección (objetos de fila).
+  const onSelectionChangeRef = useRef(onSelectionChange);
+  onSelectionChangeRef.current = onSelectionChange;
+  useEffect(() => {
+    onSelectionChangeRef.current?.(selectedRows);
+  }, [selectedRows]);
+
+  // Casilla de cabecera: marca/indeterminada según las filas FILTRADAS.
+  const filteredKeys = useMemo(() => filteredRows.map((row, i) => keyOf(row, i)), [filteredRows, rowKey]);
+  const selectedFilteredCount = useMemo(
+    () => filteredKeys.reduce<number>((n, k) => (selectedKeys.has(k) ? n + 1 : n), 0),
+    [filteredKeys, selectedKeys],
+  );
+  const allFilteredSelected = filteredKeys.length > 0 && selectedFilteredCount === filteredKeys.length;
+  const someFilteredSelected = selectedFilteredCount > 0 && !allFilteredSelected;
+  const headerCheckRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (headerCheckRef.current) headerCheckRef.current.indeterminate = someFilteredSelected;
+  }, [someFilteredSelected]);
+
+  function toggleRowSelected(key: string | number) {
+    setSelectedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+  function toggleSelectAll() {
+    setSelectedKeys((prev) => {
+      const next = new Set(prev);
+      if (allFilteredSelected) {
+        // deselecciona solo las filtradas (respeta selección fuera del filtro)
+        filteredKeys.forEach((k) => next.delete(k));
+      } else {
+        filteredKeys.forEach((k) => next.add(k));
+      }
+      return next;
+    });
+  }
+
   // ── paginación (cliente, sobre lo filtrado) ──
   const pageCount = paginated ? Math.max(1, Math.ceil(filteredRows.length / pageSize)) : 1;
   const safePage = Math.min(pageIndex, pageCount - 1);
@@ -371,7 +441,8 @@ export function DataTable<T>({
     e.preventDefault();
     e.stopPropagation();
     const ths = Array.from(theadRef.current?.querySelectorAll("th") ?? []) as HTMLElement[];
-    const lead = expandable ? 1 : 0; // la columna del chevron va primero
+    // columnas que preceden a las de datos: casilla de selección y/o chevron
+    const lead = (selectable ? 1 : 0) + (expandable ? 1 : 0);
     const base: Record<string, number> = { ...widths };
     renderCols.forEach(({ id: cid }, i) => {
       if (base[cid] == null) {
@@ -500,8 +571,8 @@ export function DataTable<T>({
   ) : null;
 
   const hasWidths = resizable && Object.keys(widths).length > 0;
-  // Total de columnas reales + extras (chevron y acciones), para los colSpan.
-  const totalCols = renderCols.length + (expandable ? 1 : 0) + (hasActions ? 1 : 0);
+  // Total de columnas reales + extras (casilla, chevron y acciones), para los colSpan.
+  const totalCols = renderCols.length + (selectable ? 1 : 0) + (expandable ? 1 : 0) + (hasActions ? 1 : 0);
   // Ancho de la columna de acciones: depende de cuántos íconos hay visibles
   // (+ el botón ⋮). Es fija (no se redimensiona).
   const actionsWidth = (actionsMenu ? 34 : 0) + Math.max(visibleActions.length, 1) * 32 + 16;
@@ -511,6 +582,7 @@ export function DataTable<T>({
   // columna NO comprime a las demás.
   const totalWidth = hasWidths
     ? renderCols.reduce((sum, { id }) => sum + (widths[id] ?? MIN_W), 0) +
+      (selectable ? EXPAND_W : 0) +
       (expandable ? EXPAND_W : 0) +
       (hasActions ? actionsWidth : 0)
     : undefined;
@@ -534,6 +606,7 @@ export function DataTable<T>({
         >
           {hasWidths && (
             <colgroup>
+              {selectable && <col style={{ width: EXPAND_W }} />}
               {expandable && <col style={{ width: EXPAND_W }} />}
               {renderCols.map(({ id }) => (
                 <col key={id} style={{ width: widths[id] ?? MIN_W }} />
@@ -543,6 +616,17 @@ export function DataTable<T>({
           )}
           <thead ref={theadRef} className="bg-surface-2 text-left text-xs uppercase tracking-wide text-muted">
             <tr>
+              {selectable && (
+                <th className="w-10 px-3 py-2.5">
+                  <Checkbox
+                    ref={headerCheckRef}
+                    checked={allFilteredSelected}
+                    onChange={toggleSelectAll}
+                    disabled={filteredKeys.length === 0}
+                    aria-label="Seleccionar todo"
+                  />
+                </th>
+              )}
               {expandable && <th className="w-8 px-2 py-2.5" aria-hidden />}
               {renderCols.map(({ col, id }, ci) => {
                 const active = sort?.id === id;
@@ -665,6 +749,15 @@ export function DataTable<T>({
                       onClick={() => (expandable ? toggleExpand(key, row) : onRowClick?.(row))}
                       className={`border-t border-border ${clickable ? "cursor-pointer hover:bg-surface-2" : ""} ${isOpen ? "bg-surface-2" : ""}`}
                     >
+                      {selectable && (
+                        <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
+                          <Checkbox
+                            checked={selectedKeys.has(key)}
+                            onChange={() => toggleRowSelected(key)}
+                            aria-label="Seleccionar fila"
+                          />
+                        </td>
+                      )}
                       {expandable && (
                         <td className="px-2 py-2.5 text-muted">
                           <ChevronRight size={16} className={`transition-transform ${isOpen ? "rotate-90" : ""}`} />

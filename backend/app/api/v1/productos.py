@@ -74,7 +74,7 @@ def list_productos(
     q: Optional[str] = Query(default=None, max_length=254),
     categoria_id: Optional[UUID] = Query(default=None),
     activo: Optional[bool] = Query(default=None),
-    limit: int = Query(default=50, ge=1, le=200),
+    limit: int = Query(default=50, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_READ)),

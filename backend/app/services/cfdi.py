@@ -54,7 +54,12 @@ def _receptor(factura: Factura, cliente: Cliente, tenant: Tenant, expedition: st
 def build_payload(db: Session, factura: Factura) -> dict:
     cliente = db.query(Cliente).filter(Cliente.id == factura.cliente_id).one()
     tenant = db.query(Tenant).filter(Tenant.id == factura.tenant_id).one()
-    expedition = settings.FACTURAMA_EXPEDITION_PLACE or factura.lugar_expedicion or tenant.domicilio_fiscal_cp
+    # Lugar de expedición = CP del emisor. En multi-emisor es el del tenant; el env
+    # solo es respaldo. En modo single-emisor se conserva la precedencia previa.
+    if getattr(settings, "FACTURAMA_MULTIEMISOR", False):
+        expedition = factura.lugar_expedicion or tenant.domicilio_fiscal_cp or settings.FACTURAMA_EXPEDITION_PLACE
+    else:
+        expedition = settings.FACTURAMA_EXPEDITION_PLACE or factura.lugar_expedicion or tenant.domicilio_fiscal_cp
 
     # Productos (para los litros del IEPS por cuota).
     prod_ids = {ln.producto_id for ln in factura.lineas if ln.producto_id}
@@ -145,12 +150,22 @@ def build_payload(db: Session, factura: Factura) -> dict:
             "Year": factura.fecha.year,
         }
 
-    # Emisor explícito solo si está configurado. Si se omite, Facturama usa el CSD
-    # por defecto de la cuenta. En producción, fíjalo al RFC cuyo CSD está cargado.
+    # Emisor del CFDI. Precedencia:
+    #   1. FACTURAMA_ISSUER_RFC → override GLOBAL de un solo emisor (sandbox/single).
+    #   2. FACTURAMA_MULTIEMISOR=true → emisor = datos fiscales del PROPIO tenant
+    #      (su RFC/CSD, ya subido a Facturama vía Ajustes › Empresa). Es el modo
+    #      multi-empresa: cada quien factura a su nombre.
+    #   3. ninguno → se omite y Facturama usa el CSD por defecto de la cuenta.
     if settings.FACTURAMA_ISSUER_RFC:
         payload["Issuer"] = {
             "Rfc": settings.FACTURAMA_ISSUER_RFC,
             "Name": settings.FACTURAMA_ISSUER_NAME or tenant.legal_name,
             "FiscalRegime": settings.FACTURAMA_ISSUER_REGIMEN or tenant.regimen_fiscal_sat,
+        }
+    elif getattr(settings, "FACTURAMA_MULTIEMISOR", False):
+        payload["Issuer"] = {
+            "Rfc": tenant.rfc,
+            "Name": tenant.legal_name,
+            "FiscalRegime": tenant.regimen_fiscal_sat,
         }
     return payload
