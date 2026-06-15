@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     # Model for the SAT-code suggester. Haiku is plenty for this simple
     # classification (~5x cheaper than Opus); override via env if ever needed.
     SAT_AI_MODEL: str = "claude-haiku-4-5"
+    # Ambiente del PAC: sandbox (default) o producción (https://api.facturama.mx).
     FACTURAMA_BASE_URL: str = "https://apisandbox.facturama.mx"
     FACTURAMA_API_KEY: str = ""
     FACTURAMA_USER: str = ""
@@ -48,8 +49,12 @@ class Settings(BaseSettings):
     # Levanta el guard "solo sandbox" para permitir el host de producción
     # (api.facturama.mx). Mantener false hasta tener CSD/credenciales de producción.
     FACTURAMA_ALLOW_PRODUCTION: bool = False
+    # Envía Serie/Folio propios al PAC. Facturama SOLO acepta series dadas de alta
+    # en la cuenta/sucursal; activar solo cuando esas series existan en Facturama.
+    FACTURAMA_SEND_SERIE: bool = False
     # Emisor opcional: si está vacío, Facturama usa el CSD por defecto de la cuenta
-    # (lo correcto en sandbox, donde el RFC real del tenant no tiene CSD registrado).
+    # (lo correcto en sandbox). En producción, fíjalo al RFC real cuyo CSD está
+    # cargado en Facturama.
     FACTURAMA_ISSUER_RFC: str = ""
     FACTURAMA_ISSUER_NAME: str = ""
     FACTURAMA_ISSUER_REGIMEN: str = ""

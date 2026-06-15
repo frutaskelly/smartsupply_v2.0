@@ -336,14 +336,18 @@ def factura_directa(
     return factura
 
 
-# ─── Timbrado (SOLO SANDBOX) ──────────────────────────────────────────────────
+# ─── Timbrado ─────────────────────────────────────────────────────────────────
 @router.post("/{factura_id}/timbrar", response_model=FacturaDetailOut)
 def timbrar_factura(
     factura_id: UUID,
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_WRITE)),
 ):
-    """Timbra la factura contra Facturama **sandbox** (BORRADOR → TIMBRADA)."""
+    """Timbra la factura contra Facturama (BORRADOR → TIMBRADA).
+
+    El ambiente (sandbox/producción) lo decide FACTURAMA_BASE_URL; en producción
+    el timbre es REAL ante el SAT.
+    """
     factura = get_or_404(db, Factura, factura_id)
     if factura.estado == "TIMBRADA":
         raise HTTPException(status_code=409, detail="La factura ya está timbrada")
@@ -352,7 +356,7 @@ def timbrar_factura(
 
     client = FacturamaClient.from_settings(settings)
     if not client.configured:
-        raise HTTPException(status_code=503, detail="Facturama (sandbox) no está configurado")
+        raise HTTPException(status_code=503, detail="Facturama no está configurado")
 
     payload = build_payload(db, factura)
     try:
@@ -381,7 +385,11 @@ def cancelar_factura(
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_WRITE)),
 ):
-    """Cancela el CFDI ante el PAC (sandbox) y libera sus remisiones."""
+    """Cancela el CFDI ante el PAC y libera sus remisiones.
+
+    Con FACTURAMA_FAKE_CANCEL=true la cancelación es interna (no llama al PAC);
+    en producción debe ser false para que la cancelación llegue al SAT.
+    """
     factura = get_or_404(db, Factura, factura_id)
     if factura.estado != "TIMBRADA":
         raise HTTPException(status_code=409, detail="Solo se cancela una factura timbrada")
