@@ -202,6 +202,7 @@ def startup_warnings(settings) -> list[str]:
     has_creds = bool(getattr(settings, "FACTURAMA_USER", "")) and bool(
         getattr(settings, "FACTURAMA_PASSWORD", "")
     )
+    multiemisor = bool(getattr(settings, "FACTURAMA_MULTIEMISOR", False))
 
     warnings: list[str] = []
     if is_prod and not allow_prod:
@@ -215,7 +216,9 @@ def startup_warnings(settings) -> list[str]:
             "enviarán al SAT (el CFDI seguirá vigente ante el SAT aunque la app lo "
             "marque CANCELADA). Pon FACTURAMA_FAKE_CANCEL=false en producción."
         )
-    if is_prod and not getattr(settings, "FACTURAMA_ISSUER_RFC", ""):
+    # En multi-emisor el emisor se arma por-tenant (no se usa ISSUER_RFC global),
+    # así que su ausencia es lo ESPERADO; solo se avisa en modo single-emisor.
+    if is_prod and not multiemisor and not getattr(settings, "FACTURAMA_ISSUER_RFC", ""):
         warnings.append(
             "PRODUCCIÓN sin FACTURAMA_ISSUER_RFC: se usará el CSD por defecto de la "
             "cuenta Facturama. Verifica que sea el emisor correcto."
