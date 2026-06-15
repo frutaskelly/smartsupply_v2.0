@@ -24,6 +24,7 @@ from ...schemas.cliente import ClienteCreate, ClienteOut, ClienteUpdate
 from ...schemas.common import Page
 from ...services.cliente_codigo import generate_cliente_codigo
 from ...services.facturama import FacturamaClient, FacturamaError
+from ...services.rfc import validar_rfc_local
 from ._helpers import ensure_fk, flush_or_conflict, get_or_404, paginate
 
 router = APIRouter(prefix="/clientes", tags=["clientes"])
@@ -69,11 +70,19 @@ def validar_rfc(
     Devuelve {Rfc, FormatoCorrecto, Activo, Localizado, ...}. Consume 1 folio de
     Facturama por llamada (botón manual en el formulario de clientes).
     """
+    rfc_u = rfc.strip().upper()
+    # Filtro local: formato + dígito verificador. El sandbox de Facturama aprueba
+    # cualquier RFC bien formado, así que esto atrapa typos (p. ej. ...V1 vs ...VA)
+    # sin consultar al SAT ni gastar un folio.
+    local = validar_rfc_local(rfc_u)
+    if not (local["formato_ok"] and local["digito_ok"]):
+        return {"Rfc": rfc_u, "FormatoCorrecto": False, "Activo": False, "Localizado": False}
+
     client = FacturamaClient.from_settings(settings)
     if not client.configured:
         raise HTTPException(status_code=503, detail="Facturama (sandbox) no está configurado")
     try:
-        return client.validar_rfc(rfc.strip().upper())
+        return client.validar_rfc(rfc_u)
     except FacturamaError as exc:
         raise HTTPException(status_code=502, detail=f"No se pudo validar el RFC: {exc}")
 
