@@ -68,6 +68,12 @@ class Settings(BaseSettings):
     # ─── Cache ────────────────────────────────────────────────────────────────
     REDIS_URL: str = "redis://localhost:6379/0"
 
+    # ─── Signup público (anti-abuso) ────────────────────────────────────────────
+    # Kill-switch: false deshabilita el registro autoservicio (POST /registro).
+    SIGNUP_ENABLED: bool = True
+    # Máximo de registros por IP por hora (rate limit con Redis; fail-open).
+    SIGNUP_RATE_PER_HOUR: int = 5
+
     # ─── CORS (comma-separated) ─────────────────────────────────────────────────
     ALLOWED_ORIGINS: str = "http://localhost:3012,http://localhost:3000"
 

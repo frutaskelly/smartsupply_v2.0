@@ -22,10 +22,12 @@ from __future__ import annotations
 import re
 import unicodedata
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
+from ...core.config import settings
 from ...core.db import get_db
+from ...core.ratelimit import client_ip, hit
 from ...models import Membership, Role, Tenant, User
 from ...schemas.registro import RegistroIn, RegistroOut
 from ...services import supabase_admin
@@ -54,7 +56,24 @@ def _unique_slug(db: Session, name: str) -> str:
 
 
 @router.post("", response_model=RegistroOut, status_code=201)
-def registro(payload: RegistroIn, db: Session = Depends(get_db)):
+def registro(payload: RegistroIn, request: Request, db: Session = Depends(get_db)):
+    # ─── Anti-abuso ───────────────────────────────────────────────────────────
+    # Kill-switch del operador.
+    if not settings.SIGNUP_ENABLED:
+        raise HTTPException(403, "El registro está temporalmente deshabilitado.")
+    # Honeypot: un humano nunca llena este campo (está oculto en el form).
+    if payload.website:
+        raise HTTPException(400, "Solicitud inválida.")
+    # Rate limit por IP (Redis; fail-open si no hay Redis).
+    ip = client_ip(request)
+    ok, retry = hit(f"signup:{ip}", settings.SIGNUP_RATE_PER_HOUR, 3600)
+    if not ok:
+        raise HTTPException(
+            429,
+            "Demasiados registros desde tu red. Intenta más tarde.",
+            headers={"Retry-After": str(retry)},
+        )
+
     email = payload.owner_email.strip().lower()
     rfc = payload.rfc.strip().upper()
     cp = payload.domicilio_fiscal_cp.strip()

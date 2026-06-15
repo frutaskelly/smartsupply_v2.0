@@ -45,6 +45,7 @@ export default function SignupPage() {
   const [ownerName, setOwnerName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [hp, setHp] = useState(""); // honeypot anti-bot (oculto)
 
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -78,6 +79,7 @@ export default function SignupPage() {
           owner_email: email.trim().toLowerCase(),
           owner_name: ownerName.trim() || null,
           password,
+          website: hp || null,
         }),
       });
 
@@ -108,6 +110,18 @@ export default function SignupPage() {
         </p>
 
         <form onSubmit={onSubmit} className="mt-6 space-y-4">
+          {/* Honeypot anti-bot: oculto y no enfocable; un humano nunca lo llena. */}
+          <input
+            type="text"
+            name="website"
+            tabIndex={-1}
+            autoComplete="off"
+            aria-hidden="true"
+            value={hp}
+            onChange={(e) => setHp(e.target.value)}
+            style={{ position: "absolute", left: "-9999px", width: 1, height: 1, opacity: 0 }}
+          />
+
           <div className="text-xs font-medium uppercase tracking-wide text-muted">
             Tu empresa
           </div>

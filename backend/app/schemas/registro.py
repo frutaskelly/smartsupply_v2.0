@@ -17,6 +17,8 @@ class RegistroIn(BaseModel):
     owner_email: str = Field(min_length=3, max_length=254)
     owner_name: Optional[str] = Field(default=None, max_length=254)
     password: str = Field(min_length=8, max_length=128)
+    # Honeypot anti-bot: campo oculto en el form; si llega con valor, es un bot.
+    website: Optional[str] = Field(default=None, max_length=254)
 
 
 class RegistroOut(BaseModel):
