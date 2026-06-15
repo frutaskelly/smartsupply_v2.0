@@ -403,7 +403,11 @@ def cancelar_factura(
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_WRITE)),
 ):
-    """Cancela el CFDI ante el PAC (sandbox) y libera sus remisiones."""
+    """Cancela el CFDI ante el PAC y libera sus remisiones.
+
+    Con FACTURAMA_FAKE_CANCEL=true la cancelación es interna (no llama al PAC);
+    en producción debe ser false para que la cancelación llegue al SAT.
+    """
     factura = get_or_404(db, Factura, factura_id)
     if factura.estado != "TIMBRADA":
         raise HTTPException(status_code=409, detail="Solo se cancela una factura timbrada")

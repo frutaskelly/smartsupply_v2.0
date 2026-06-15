@@ -2,8 +2,10 @@
 
 Las líneas ya traen el desglose fiscal calculado al crear la factura
 (services/fiscal.py), así que aquí solo se mapea al formato de Facturama.
-El emisor (Issuer) se omite si no hay FACTURAMA_ISSUER_RFC configurado: en
-sandbox Facturama usa el CSD por defecto de la cuenta.
+El emisor (Issuer) se omite si no hay FACTURAMA_ISSUER_RFC configurado: en ese
+caso Facturama usa el CSD por defecto de la cuenta (correcto cuando la cuenta
+tiene un único CSD; en producción conviene fijar FACTURAMA_ISSUER_RFC al RFC real
+del emisor cuyo CSD está cargado en Facturama).
 """
 from __future__ import annotations
 

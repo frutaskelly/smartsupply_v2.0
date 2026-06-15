@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from . import __version__
 from .core.config import settings
+from .services.facturama import startup_warnings as facturama_startup_warnings
 from .api.v1 import (
     almacenes,
     auth,
@@ -38,11 +39,18 @@ log = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    facturama_env = (
+        "producción" if "apisandbox.facturama.mx" not in settings.FACTURAMA_BASE_URL
+        else "sandbox"
+    )
     log.info(
-        "SmartSupply v2.0 starting — env=%s, origins=%s",
+        "SmartSupply v2.0 starting — env=%s, facturama=%s, origins=%s",
         settings.ENVIRONMENT,
+        facturama_env,
         settings.allowed_origins_list(),
     )
+    for w in facturama_startup_warnings(settings):
+        log.warning("Facturama config: %s", w)
     yield
     log.info("Shutting down")
 
