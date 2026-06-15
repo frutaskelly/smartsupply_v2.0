@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -34,6 +34,12 @@ const REGIMEN_FISCAL_OPTS: { value: string; label: string }[] = [
   { value: "626", label: "626 — Régimen Simplificado de Confianza (RESICO)" },
 ];
 
+const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? "";
+
+type TurnstileApi = {
+  render: (el: HTMLElement, opts: Record<string, unknown>) => void;
+};
+
 export default function SignupPage() {
   const router = useRouter();
   const { session } = useAuth();
@@ -46,13 +52,44 @@ export default function SignupPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [hp, setHp] = useState(""); // honeypot anti-bot (oculto)
+  const [captchaToken, setCaptchaToken] = useState("");
+  const captchaRef = useRef<HTMLDivElement>(null);
 
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [confirmSent, setConfirmSent] = useState(false);
 
   useEffect(() => {
     if (session) router.replace("/dashboard");
   }, [session, router]);
+
+  // Carga y renderiza el widget de Turnstile solo si hay site key configurada.
+  useEffect(() => {
+    if (!TURNSTILE_SITE_KEY) return;
+    const SCRIPT_ID = "cf-turnstile-script";
+    const render = () => {
+      const w = window as unknown as { turnstile?: TurnstileApi };
+      if (w.turnstile && captchaRef.current && !captchaRef.current.hasChildNodes()) {
+        w.turnstile.render(captchaRef.current, {
+          sitekey: TURNSTILE_SITE_KEY,
+          callback: (t: string) => setCaptchaToken(t),
+          "error-callback": () => setCaptchaToken(""),
+          "expired-callback": () => setCaptchaToken(""),
+        });
+      }
+    };
+    if (!document.getElementById(SCRIPT_ID)) {
+      const s = document.createElement("script");
+      s.id = SCRIPT_ID;
+      s.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+      s.async = true;
+      s.defer = true;
+      s.onload = render;
+      document.head.appendChild(s);
+    } else {
+      render();
+    }
+  }, []);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -66,26 +103,43 @@ export default function SignupPage() {
       setError("La contraseña debe tener al menos 8 caracteres");
       return;
     }
+    if (TURNSTILE_SITE_KEY && !captchaToken) {
+      setError("Completa la verificación anti-bot");
+      return;
+    }
 
+    const cleanEmail = email.trim().toLowerCase();
     setBusy(true);
     try {
-      await apiFetch("/api/v1/registro", {
+      const res = await apiFetch<{ email_confirmation_required?: boolean }>("/api/v1/registro", {
         method: "POST",
         body: JSON.stringify({
           legal_name: legalName.trim(),
           rfc: rfc.trim().toUpperCase(),
           regimen_fiscal_sat: regimen,
           domicilio_fiscal_cp: cp.trim(),
-          owner_email: email.trim().toLowerCase(),
+          owner_email: cleanEmail,
           owner_name: ownerName.trim() || null,
           password,
           website: hp || null,
+          turnstile_token: captchaToken || null,
         }),
       });
 
-      // Alta correcta → iniciar sesión y mandar al onboarding fiscal.
+      // Si se exige confirmar correo: dispara el envío y muestra estado pendiente.
+      if (res?.email_confirmation_required) {
+        try {
+          await getSupabase().auth.resend({ type: "signup", email: cleanEmail });
+        } catch {
+          /* el correo de confirmación puede reenviarse desde login */
+        }
+        setConfirmSent(true);
+        return;
+      }
+
+      // Flujo normal → iniciar sesión y mandar al onboarding fiscal.
       const { error: signInError } = await getSupabase().auth.signInWithPassword({
-        email: email.trim().toLowerCase(),
+        email: cleanEmail,
         password,
       });
       if (signInError) {
@@ -99,6 +153,23 @@ export default function SignupPage() {
     } finally {
       setBusy(false);
     }
+  }
+
+  if (confirmSent) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-surface px-4">
+        <div className="w-full max-w-md rounded-2xl border border-border bg-background p-8 text-center shadow-sm">
+          <h1 className="text-xl font-semibold tracking-tight">Confirma tu correo</h1>
+          <p className="mt-2 text-sm text-muted">
+            Te enviamos un correo a <span className="font-medium text-foreground">{email}</span>.
+            Ábrelo y confirma tu cuenta para poder iniciar sesión.
+          </p>
+          <Link href="/login" className="mt-6 inline-block text-sm font-medium hover:underline">
+            Ir a iniciar sesión
+          </Link>
+        </div>
+      </main>
+    );
   }
 
   return (
@@ -192,6 +263,8 @@ export default function SignupPage() {
               onChange={(e) => setPassword(e.target.value)}
             />
           </Field>
+
+          {TURNSTILE_SITE_KEY && <div ref={captchaRef} className="flex justify-center" />}
 
           {error && <Alert tone="danger">{error}</Alert>}
 

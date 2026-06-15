@@ -19,9 +19,13 @@ class RegistroIn(BaseModel):
     password: str = Field(min_length=8, max_length=128)
     # Honeypot anti-bot: campo oculto en el form; si llega con valor, es un bot.
     website: Optional[str] = Field(default=None, max_length=254)
+    # Token de Cloudflare Turnstile (captcha); requerido solo si el server lo exige.
+    turnstile_token: Optional[str] = Field(default=None, max_length=4096)
 
 
 class RegistroOut(BaseModel):
     tenant_id: uuid.UUID
     slug: str
     email: str
+    # Si true, el usuario debe confirmar su correo antes de iniciar sesión.
+    email_confirmation_required: bool = False

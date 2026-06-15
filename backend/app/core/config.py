@@ -73,6 +73,12 @@ class Settings(BaseSettings):
     SIGNUP_ENABLED: bool = True
     # Máximo de registros por IP por hora (rate limit con Redis; fail-open).
     SIGNUP_RATE_PER_HOUR: int = 5
+    # Captcha Cloudflare Turnstile: si hay secret, /registro exige y valida el token.
+    # Vacío = desactivado (dev/local). El site key va en el front (NEXT_PUBLIC_*).
+    TURNSTILE_SECRET: str = ""
+    # Exigir confirmación de correo antes de poder iniciar sesión. Requiere que el
+    # proyecto Supabase tenga "Confirm email" + envío de correo configurado.
+    SIGNUP_REQUIRE_EMAIL_CONFIRM: bool = False
 
     # ─── CORS (comma-separated) ─────────────────────────────────────────────────
     ALLOWED_ORIGINS: str = "http://localhost:3012,http://localhost:3000"

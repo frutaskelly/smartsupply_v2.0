@@ -30,7 +30,7 @@ from ...core.db import get_db
 from ...core.ratelimit import client_ip, hit
 from ...models import Membership, Role, Tenant, User
 from ...schemas.registro import RegistroIn, RegistroOut
-from ...services import supabase_admin
+from ...services import supabase_admin, turnstile
 from ...services.onboarding import rfc_valido
 
 router = APIRouter(prefix="/registro", tags=["registro"])
@@ -73,6 +73,9 @@ def registro(payload: RegistroIn, request: Request, db: Session = Depends(get_db
             "Demasiados registros desde tu red. Intenta más tarde.",
             headers={"Retry-After": str(retry)},
         )
+    # Captcha (solo si el operador configuró TURNSTILE_SECRET).
+    if not turnstile.verify(payload.turnstile_token, ip):
+        raise HTTPException(400, "Verificación anti-bot fallida. Recarga e intenta de nuevo.")
 
     email = payload.owner_email.strip().lower()
     rfc = payload.rfc.strip().upper()
@@ -107,8 +110,11 @@ def registro(payload: RegistroIn, request: Request, db: Session = Depends(get_db
     slug = _unique_slug(db, legal_name)
 
     # ─── 1) Cuenta de Auth ────────────────────────────────────────────────────
+    require_confirm = bool(settings.SIGNUP_REQUIRE_EMAIL_CONFIRM)
     try:
-        auth_id = supabase_admin.create_auth_user(email, payload.password, payload.owner_name)
+        auth_id = supabase_admin.create_auth_user(
+            email, payload.password, payload.owner_name, email_confirm=not require_confirm
+        )
     except supabase_admin.SupabaseAdminError as exc:
         # Lo más común: el correo ya existe en Auth (aunque no en nuestra BD).
         detail = str(exc)
@@ -151,4 +157,7 @@ def registro(payload: RegistroIn, request: Request, db: Session = Depends(get_db
         supabase_admin.delete_auth_user(auth_id)  # best-effort: no dejar huérfanos
         raise HTTPException(409, "No se pudo completar el registro (¿correo o RFC ya en uso?).")
 
-    return RegistroOut(tenant_id=tenant.id, slug=slug, email=email)
+    return RegistroOut(
+        tenant_id=tenant.id, slug=slug, email=email,
+        email_confirmation_required=require_confirm,
+    )
