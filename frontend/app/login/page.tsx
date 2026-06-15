@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import { Alert } from "@/components/ui/Alert";
@@ -63,6 +64,13 @@ export default function LoginPage() {
             {busy ? "Entrando…" : "Entrar"}
           </Button>
         </form>
+
+        <p className="mt-6 text-center text-sm text-muted">
+          ¿No tienes cuenta?{" "}
+          <Link href="/signup" className="font-medium text-foreground hover:underline">
+            Regístrate
+          </Link>
+        </p>
       </div>
     </main>
   );

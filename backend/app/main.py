@@ -26,6 +26,7 @@ from .api.v1 import (
     precios,
     productos,
     proveedores,
+    registro,
     remisiones,
     roles,
     sat,
@@ -85,6 +86,7 @@ def api_root() -> dict:
 
 # ─── API v1 routers ───────────────────────────────────────────────────────────
 app.include_router(auth.router, prefix="/api/v1")
+app.include_router(registro.router, prefix="/api/v1")  # PÚBLICO (signup autoservicio)
 # Phase 3 — catálogo / master data
 app.include_router(categorias.router, prefix="/api/v1")
 app.include_router(esquemas_impuesto.router, prefix="/api/v1")
