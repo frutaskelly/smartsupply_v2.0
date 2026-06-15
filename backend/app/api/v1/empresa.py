@@ -21,8 +21,9 @@ from ...core.config import settings
 from ...core.db import get_db
 from ...core.rbac import AuthContext, require_permission
 from ...models import Tenant
-from ...schemas.empresa import EmpresaOut, EmpresaUpdate
+from ...schemas.empresa import EmpresaOnboardingOut, EmpresaOut, EmpresaUpdate
 from ...services.facturama import FacturamaClient, FacturamaError
+from ...services.onboarding import compute_status
 
 router = APIRouter(prefix="/empresa", tags=["empresa"])
 
@@ -99,7 +100,7 @@ def subir_csd(
 
     client = FacturamaClient.from_settings(settings)
     if not client.configured:
-        raise HTTPException(status_code=503, detail="Facturama (sandbox) no está configurado")
+        raise HTTPException(status_code=503, detail="Facturama no está configurado")
 
     cer_b64 = base64.b64encode(cer.file.read()).decode()
     key_b64 = base64.b64encode(key.file.read()).decode()
@@ -115,5 +116,20 @@ def listar_csd(
 ):
     client = FacturamaClient.from_settings(settings)
     if not client.configured:
-        raise HTTPException(status_code=503, detail="Facturama (sandbox) no está configurado")
+        raise HTTPException(status_code=503, detail="Facturama no está configurado")
     return client.listar_csds()
+
+
+@router.get("/onboarding", response_model=EmpresaOnboardingOut)
+def onboarding_status(
+    db: Session = Depends(get_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """Estado de la configuración fiscal del emisor para el wizard de onboarding:
+    datos fiscales, RFC válido y CSD cargado → `listo_para_facturar`."""
+    tenant = _load_tenant(db, ctx.tenant_id)
+    client = FacturamaClient.from_settings(settings)
+    status = compute_status(
+        client, tenant, multiemisor=bool(getattr(settings, "FACTURAMA_MULTIEMISOR", False))
+    )
+    return EmpresaOnboardingOut(**status)

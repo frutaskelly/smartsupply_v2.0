@@ -12,6 +12,7 @@ import { Field, Input, Select } from "@/components/ui/Field";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { useToast } from "@/components/ui/Toast";
 import { KeyboardCombobox, type ComboOption } from "@/components/KeyboardCombobox";
+import { OnboardingChecklist } from "@/components/OnboardingChecklist";
 import { ApiError, apiFetch } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import { getSupabase } from "@/lib/supabaseClient";
@@ -127,6 +128,9 @@ export default function EmpresaPage() {
   const [locked, setLocked] = useState(false);
   const [editConfirmOpen, setEditConfirmOpen] = useState(false);
 
+  // Recarga el checklist de onboarding tras guardar datos o subir CSD.
+  const [onboardingKey, setOnboardingKey] = useState(0);
+
   const [csds, setCsds] = useState<Csd[]>([]);
   const [cerFile, setCerFile] = useState<File | null>(null);
   const [keyFile, setKeyFile] = useState<File | null>(null);
@@ -228,6 +232,7 @@ export default function EmpresaPage() {
       });
       toast.success("Datos fiscales guardados");
       setLocked(true);
+      setOnboardingKey((k) => k + 1);
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo guardar");
     } finally {
@@ -278,6 +283,7 @@ export default function EmpresaPage() {
       setKeyFile(null);
       setCsdPassword("");
       loadCsds();
+      setOnboardingKey((k) => k + 1);
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo subir el CSD");
     } finally {
@@ -294,6 +300,8 @@ export default function EmpresaPage() {
         title="Empresa"
         subtitle="Datos fiscales del emisor y sellos digitales (CSD)"
       />
+
+      <OnboardingChecklist refreshKey={onboardingKey} />
 
       <Card title="Datos fiscales" subtitle="Información del emisor que aparece en los CFDIs">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

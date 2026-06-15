@@ -26,3 +26,22 @@ class CsdOut(BaseModel):
     """Pass-through del objeto que devuelve Facturama por cada CSD cargado."""
 
     model_config = {"extra": "allow"}
+
+
+class OnboardingPaso(BaseModel):
+    id: str
+    titulo: str
+    completo: bool
+    detalle: str = ""
+
+
+class EmpresaOnboardingOut(BaseModel):
+    """Estado de la configuración fiscal del emisor (wizard de onboarding)."""
+
+    datos_fiscales_completos: bool
+    rfc: str = ""
+    csd_cargado: bool
+    csd: Dict[str, Any] | None = None
+    multiemisor: bool
+    listo_para_facturar: bool
+    pasos: list[OnboardingPaso] = Field(default_factory=list)

@@ -48,7 +48,12 @@ class Settings(BaseSettings):
     # Levanta el guard "solo sandbox" para permitir el host de producción
     # (api.facturama.mx). Mantener false hasta tener CSD/credenciales de producción.
     FACTURAMA_ALLOW_PRODUCTION: bool = False
-    # Emisor opcional: si está vacío, Facturama usa el CSD por defecto de la cuenta
+    # Multi-emisor: cada tenant timbra con SU propio RFC/CSD (subido a la cuenta
+    # maestra de Facturama). Con true, el emisor del CFDI se arma desde los datos
+    # fiscales del tenant. En producción multi-empresa: true.
+    FACTURAMA_MULTIEMISOR: bool = False
+    # Emisor opcional (override GLOBAL de un solo emisor): si está vacío, y
+    # FACTURAMA_MULTIEMISOR=false, Facturama usa el CSD por defecto de la cuenta
     # (lo correcto en sandbox, donde el RFC real del tenant no tiene CSD registrado).
     FACTURAMA_ISSUER_RFC: str = ""
     FACTURAMA_ISSUER_NAME: str = ""

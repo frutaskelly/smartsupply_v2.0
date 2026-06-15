@@ -42,6 +42,7 @@ from ...schemas.factura import (
 from ...services.cfdi import build_payload
 from ...services.facturama import FacturamaClient, FacturamaError
 from ...services.fiscal import calcular_linea, totales
+from ...services.onboarding import compute_status
 from ...services.inventario import build_movimiento, presentacion_factor, presentacion_sat
 from ...services.series import consumir_folio, resolver_serie, siguiente_folio
 from ._helpers import get_or_404, paginate
@@ -338,14 +339,18 @@ def factura_directa(
     return factura
 
 
-# ─── Timbrado (SOLO SANDBOX) ──────────────────────────────────────────────────
+# ─── Timbrado ─────────────────────────────────────────────────────────────────
 @router.post("/{factura_id}/timbrar", response_model=FacturaDetailOut)
 def timbrar_factura(
     factura_id: UUID,
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_WRITE)),
 ):
-    """Timbra la factura contra Facturama **sandbox** (BORRADOR → TIMBRADA)."""
+    """Timbra la factura contra Facturama (BORRADOR → TIMBRADA).
+
+    El ambiente (sandbox/producción) lo decide FACTURAMA_BASE_URL; en producción
+    el timbre es REAL ante el SAT.
+    """
     factura = get_or_404(db, Factura, factura_id)
     if factura.estado == "TIMBRADA":
         raise HTTPException(status_code=409, detail="La factura ya está timbrada")
@@ -354,7 +359,22 @@ def timbrar_factura(
 
     client = FacturamaClient.from_settings(settings)
     if not client.configured:
-        raise HTTPException(status_code=503, detail="Facturama (sandbox) no está configurado")
+        raise HTTPException(status_code=503, detail="Facturama no está configurado")
+
+    # Multi-emisor: el tenant debe estar listo (datos fiscales + su CSD cargado)
+    # antes de timbrar a su nombre. Mensaje accionable en vez del error críptico del PAC.
+    if bool(getattr(settings, "FACTURAMA_MULTIEMISOR", False)):
+        tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
+        estado = compute_status(client, tenant, multiemisor=True)
+        if not estado["listo_para_facturar"]:
+            faltan = [p["titulo"] for p in estado["pasos"] if not p["completo"]]
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "La empresa aún no está lista para facturar. Completa en "
+                    "Ajustes › Empresa: " + ", ".join(faltan) + "."
+                ),
+            )
 
     payload = build_payload(db, factura)
     try:
