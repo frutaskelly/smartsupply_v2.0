@@ -91,25 +91,38 @@ def buscar(db: Session, tenant_id: UUID, texto: str, *, limit: int = 5) -> list[
         out.append(_cand(by_id[alias.producto_id], 100, "alias"))
         seen.add(alias.producto_id)
 
-    # 3) difuso sobre nombre + sinónimos (rellena con parecidos: typos, variantes)
-    choices: dict[str, UUID] = {}
+    # 3) por producto: prefijo / subcadena / difuso. Se evalúa CADA producto
+    #    (no se colapsan por nombre normalizado), para que al teclear las primeras
+    #    letras aparezcan TODAS las coincidencias — incluidos duplicados.
+    #      - empieza con el texto      → 96 (prefijo, lo que el usuario espera al filtrar)
+    #      - contiene el texto         → 88 (subcadena)
+    #      - parecido (typos/variantes)→ token_set_ratio de RapidFuzz
+    _FUZZY_MIN = 75   # los parecidos PUROS (typos) deben ser fuertes — evita ruido
+    scored: list[tuple[Producto, int]] = []
     for p in prods:
-        choices[normalizar(p.nombre)] = p.id
-        for s in (p.sinonimos or []):
-            ns = normalizar(s)
-            if ns:
-                choices.setdefault(ns, p.id)
-    matches = process.extract(norm, list(choices.keys()), scorer=fuzz.token_set_ratio, limit=limit * 3)
-    best: dict[UUID, int] = {}
-    for text_choice, score, _ in matches:
-        pid = choices[text_choice]
-        if score > best.get(pid, 0):
-            best[pid] = int(score)
-    for pid, score in sorted(best.items(), key=lambda kv: kv[1], reverse=True):
-        if pid in seen or score < _FUZZY_FLOOR:
+        if p.id in seen:
             continue
-        out.append(_cand(by_id[pid], int(score), "difuso"))
-        seen.add(pid)
+        textos = [normalizar(p.nombre)] + [normalizar(s) for s in (p.sinonimos or [])]
+        score = 0
+        for h in textos:
+            if not h:
+                continue
+            if h.startswith(norm):
+                score = max(score, 96)
+            elif norm in h:
+                score = max(score, 88)
+            else:
+                fz = int(fuzz.token_set_ratio(norm, h))
+                if fz >= _FUZZY_MIN:
+                    score = max(score, fz)
+        if score >= _FUZZY_FLOOR:
+            scored.append((p, score))
+
+    # Ordena por score y, a igualdad, alfabético para un orden estable.
+    scored.sort(key=lambda kv: (-kv[1], normalizar(kv[0].nombre)))
+    for p, score in scored:
+        out.append(_cand(p, score, "difuso"))
+        seen.add(p.id)
 
     return out[:limit]
 
