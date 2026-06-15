@@ -15,7 +15,7 @@ import { ApiError, apiFetch } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import { useMutation, useResource, type Page } from "@/lib/hooks";
 import { useToast } from "@/components/ui/Toast";
-import type { Categoria, Producto } from "@/lib/types";
+import type { Categoria, EsquemaImpuesto, Producto } from "@/lib/types";
 
 const WRITE = "producto:gestionar";
 
@@ -49,6 +49,7 @@ type FormState = {
   nombre: string;
   descripcion: string;
   categoria_id: string;
+  esquema_impuesto_id: string;
   clave_sat: string;
   unidad_sat: string;
   unidad_base: string;
@@ -64,6 +65,7 @@ function emptyForm(): FormState {
     nombre: "",
     descripcion: "",
     categoria_id: "",
+    esquema_impuesto_id: "",
     clave_sat: "01010101",
     unidad_sat: "KGM",
     unidad_base: "KILO",
@@ -90,6 +92,7 @@ function toForm(p: Producto): FormState {
     nombre: p.nombre,
     descripcion: p.descripcion ?? "",
     categoria_id: p.categoria_id ?? "",
+    esquema_impuesto_id: p.esquema_impuesto_id ?? "",
     clave_sat: p.clave_sat,
     unidad_sat: p.unidad_sat,
     unidad_base: base,
@@ -112,6 +115,10 @@ export default function ProductosPage() {
     () => Object.fromEntries(categorias.map((c) => [c.id, c.nombre])),
     [categorias]
   );
+
+  // Esquemas de impuesto ya dados de alta (para asignarlos al producto).
+  const esquemasRes = useResource<Page<EsquemaImpuesto>>("/api/v1/esquemas-impuesto?limit=200");
+  const esquemas = (esquemasRes.data?.items ?? []).filter((e) => e.activo);
 
   // Se carga la lista completa: DataTableSmart se encarga de la paginación,
   // búsqueda y orden en cliente sobre todas las filas.
@@ -198,6 +205,7 @@ export default function ProductosPage() {
       nombre: form.nombre.trim(),
       descripcion: form.descripcion.trim() || null,
       categoria_id: form.categoria_id || null,
+      esquema_impuesto_id: form.esquema_impuesto_id || null,
       clave_sat: form.clave_sat.trim(),
       unidad_sat: form.unidad_sat.trim(),
       unidad_base: unidadBase,
@@ -359,6 +367,29 @@ export default function ProductosPage() {
                 <Select value={form.categoria_id} onChange={(e) => setForm({ ...form, categoria_id: e.target.value })}>
                   <option value="">— Sin categoría —</option>
                   {categorias.map((c) => (<option key={c.id} value={c.id}>{c.nombre}</option>))}
+                </Select>
+              </Field>
+            </div>
+            <div className="sm:col-span-2">
+              <Field
+                label="Esquema de impuestos"
+                hint={
+                  esquemas.length === 0
+                    ? "No hay esquemas dados de alta — créalos en Ajustes › Esquemas de impuesto"
+                    : "Define IVA/IEPS/retenciones aplicables al producto"
+                }
+              >
+                <Select
+                  value={form.esquema_impuesto_id}
+                  onChange={(e) => setForm({ ...form, esquema_impuesto_id: e.target.value })}
+                  disabled={esquemas.length === 0}
+                >
+                  <option value="">— Sin esquema —</option>
+                  {esquemas.map((e) => (
+                    <option key={e.id} value={e.id}>
+                      {e.codigo} · {e.nombre} (IVA {Math.round(Number(e.iva_tasa) * 100)}%)
+                    </option>
+                  ))}
                 </Select>
               </Field>
             </div>
