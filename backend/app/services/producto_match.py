@@ -70,21 +70,28 @@ def buscar(db: Session, tenant_id: UUID, texto: str, *, limit: int = 5) -> list[
     prods = _productos_activos(db)
     by_id = {p.id: p for p in prods}
 
-    # 1) exacto por nombre o sku
+    out: list[Candidato] = []
+    seen: set[UUID] = set()
+
+    # 1) exactos por nombre o sku — TODOS los que coinciden (no solo el primero).
+    #    Clave para evitar duplicados: si ya existen "SANDIA", "Sandía", "Sandia"
+    #    (todas normalizan igual), deben aparecer las tres para que el usuario las vea.
     for p in prods:
         if normalizar(p.nombre) == norm or normalizar(p.sku) == norm:
-            return [_cand(p, 100, "exacto")]
+            out.append(_cand(p, 100, "exacto"))
+            seen.add(p.id)
 
-    # 2) alias aprendido
+    # 2) alias aprendido (si apunta a un producto que aún no está incluido)
     alias = (
         db.query(ProductoAlias)
         .filter(ProductoAlias.alias_normalizado == norm)
         .one_or_none()
     )
-    if alias is not None and alias.producto_id in by_id:
-        return [_cand(by_id[alias.producto_id], 100, "alias")]
+    if alias is not None and alias.producto_id in by_id and alias.producto_id not in seen:
+        out.append(_cand(by_id[alias.producto_id], 100, "alias"))
+        seen.add(alias.producto_id)
 
-    # 3) difuso sobre nombre + sinónimos (mejor score por producto)
+    # 3) difuso sobre nombre + sinónimos (rellena con parecidos: typos, variantes)
     choices: dict[str, UUID] = {}
     for p in prods:
         choices[normalizar(p.nombre)] = p.id
@@ -98,15 +105,13 @@ def buscar(db: Session, tenant_id: UUID, texto: str, *, limit: int = 5) -> list[
         pid = choices[text_choice]
         if score > best.get(pid, 0):
             best[pid] = int(score)
-    ordered = sorted(best.items(), key=lambda kv: kv[1], reverse=True)
-    out = []
-    for pid, score in ordered:
-        if score < _FUZZY_FLOOR:
+    for pid, score in sorted(best.items(), key=lambda kv: kv[1], reverse=True):
+        if pid in seen or score < _FUZZY_FLOOR:
             continue
-        out.append(_cand(by_id[pid], score, "difuso"))
-        if len(out) >= limit:
-            break
-    return out
+        out.append(_cand(by_id[pid], int(score), "difuso"))
+        seen.add(pid)
+
+    return out[:limit]
 
 
 def aprender_alias(
