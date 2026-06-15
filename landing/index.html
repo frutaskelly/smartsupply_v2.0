@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SmartSupply — Facturas Inteligentes en Línea</title>
+  <meta name="description" content="Timbra CFDI 4.0, controla tu inventario y emite remisiones desde un solo lugar. Facturación inteligente para empresas en México." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #070b14;
+      --bg-soft: #0d1320;
+      --surface: #121a2b;
+      --border: #1f2a40;
+      --text: #e8edf7;
+      --muted: #9aa7bf;
+      --brand: #4f8cff;
+      --brand-2: #29e0c4;
+      --accent: #7c5cff;
+      --radius: 16px;
+      --maxw: 1140px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+    }
+    h1, h2, h3 { font-family: 'Sora', 'Inter', sans-serif; line-height: 1.1; letter-spacing: -0.02em; }
+    a { color: inherit; text-decoration: none; }
+    .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
+
+    /* ---- nav ---- */
+    header {
+      position: sticky; top: 0; z-index: 50;
+      backdrop-filter: blur(12px);
+      background: rgba(7, 11, 20, 0.72);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav { display: flex; align-items: center; justify-content: space-between; height: 68px; }
+    .logo { display: flex; align-items: center; gap: 10px; font-family: 'Sora'; font-weight: 800; font-size: 18px; }
+    .logo .mark {
+      width: 30px; height: 30px; border-radius: 9px;
+      background: linear-gradient(135deg, var(--brand), var(--brand-2));
+      display: grid; place-items: center; color: #04101a; font-weight: 800;
+    }
+    .nav-links { display: flex; gap: 30px; align-items: center; }
+    .nav-links a { color: var(--muted); font-size: 14px; font-weight: 500; transition: color .2s; }
+    .nav-links a:hover { color: var(--text); }
+    .btn {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 11px 20px; border-radius: 11px; font-weight: 600; font-size: 14px;
+      transition: transform .15s, box-shadow .2s, background .2s; cursor: pointer; border: none;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, var(--brand), var(--accent));
+      color: #fff; box-shadow: 0 8px 24px -8px rgba(79,140,255,.6);
+    }
+    .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 12px 30px -8px rgba(79,140,255,.7); }
+    .btn-ghost { background: transparent; color: var(--text); border: 1px solid var(--border); }
+    .btn-ghost:hover { border-color: var(--brand); }
+
+    /* ---- hero ---- */
+    .hero { position: relative; padding: 110px 0 90px; text-align: center; }
+    .hero::before {
+      content: ''; position: absolute; inset: -200px 0 auto 0; height: 700px; z-index: -1;
+      background:
+        radial-gradient(600px 320px at 30% 20%, rgba(79,140,255,.22), transparent 70%),
+        radial-gradient(560px 300px at 75% 10%, rgba(124,92,255,.18), transparent 70%),
+        radial-gradient(500px 300px at 55% 55%, rgba(41,224,196,.10), transparent 70%);
+      filter: blur(4px);
+    }
+    .pill {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 6px 14px; border-radius: 999px; font-size: 13px; font-weight: 500;
+      background: rgba(41,224,196,.10); color: var(--brand-2);
+      border: 1px solid rgba(41,224,196,.25); margin-bottom: 26px;
+    }
+    .pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--brand-2); box-shadow: 0 0 0 4px rgba(41,224,196,.2); }
+    .hero h1 { font-size: clamp(38px, 6vw, 66px); font-weight: 800; max-width: 880px; margin: 0 auto; }
+    .hero h1 .grad { background: linear-gradient(120deg, var(--brand), var(--brand-2)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+    .hero p.sub { font-size: clamp(16px, 2vw, 20px); color: var(--muted); max-width: 620px; margin: 22px auto 0; }
+    .hero-cta { display: flex; gap: 14px; justify-content: center; margin-top: 38px; flex-wrap: wrap; }
+    .trust { margin-top: 34px; font-size: 13px; color: var(--muted); display: flex; gap: 22px; justify-content: center; flex-wrap: wrap; }
+    .trust span { display: inline-flex; align-items: center; gap: 7px; }
+    .trust svg { color: var(--brand-2); }
+
+    /* ---- stats ---- */
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin-top: 70px; }
+    .stat { background: var(--bg-soft); padding: 26px 20px; text-align: center; }
+    .stat .num { font-family: 'Sora'; font-size: 30px; font-weight: 800; background: linear-gradient(120deg,var(--brand),var(--brand-2)); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; }
+    .stat .lbl { font-size: 13px; color: var(--muted); margin-top: 4px; }
+
+    /* ---- sections ---- */
+    section { padding: 80px 0; }
+    .eyebrow { color: var(--brand); font-weight: 600; font-size: 13px; letter-spacing: .08em; text-transform: uppercase; }
+    .sec-head { max-width: 640px; margin: 0 auto 54px; text-align: center; }
+    .sec-head h2 { font-size: clamp(28px, 4vw, 42px); margin-top: 12px; }
+    .sec-head p { color: var(--muted); margin-top: 14px; font-size: 17px; }
+
+    .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+    .card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 28px; transition: transform .2s, border-color .2s;
+    }
+    .card:hover { transform: translateY(-4px); border-color: rgba(79,140,255,.5); }
+    .card .ico {
+      width: 46px; height: 46px; border-radius: 12px; display: grid; place-items: center; margin-bottom: 18px;
+      background: linear-gradient(135deg, rgba(79,140,255,.18), rgba(41,224,196,.14));
+      border: 1px solid var(--border); color: var(--brand);
+    }
+    .card h3 { font-size: 18px; font-family: 'Inter'; font-weight: 700; letter-spacing: -.01em; }
+    .card p { color: var(--muted); font-size: 14.5px; margin-top: 8px; }
+
+    /* ---- steps ---- */
+    .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 30px; counter-reset: step; }
+    .step { position: relative; padding-top: 14px; }
+    .step .n { font-family: 'Sora'; font-weight: 800; font-size: 15px; width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: linear-gradient(135deg,var(--brand),var(--accent)); color:#fff; margin-bottom: 16px; }
+    .step h3 { font-size: 19px; font-family:'Inter'; font-weight: 700; }
+    .step p { color: var(--muted); margin-top: 8px; font-size: 14.5px; }
+
+    /* ---- cta ---- */
+    .cta-box {
+      position: relative; overflow: hidden; text-align: center;
+      background: linear-gradient(135deg, #11203f, #16133a);
+      border: 1px solid var(--border); border-radius: 24px; padding: 64px 32px;
+    }
+    .cta-box::before { content:''; position:absolute; inset:0; background: radial-gradient(500px 200px at 50% -10%, rgba(79,140,255,.35), transparent 70%); }
+    .cta-box > * { position: relative; }
+    .cta-box h2 { font-size: clamp(28px, 4vw, 40px); }
+    .cta-box p { color: var(--muted); max-width: 520px; margin: 14px auto 30px; font-size: 17px; }
+
+    /* ---- footer ---- */
+    footer { border-top: 1px solid var(--border); padding: 44px 0; color: var(--muted); font-size: 14px; }
+    .foot { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 18px; }
+    .foot-links { display: flex; gap: 24px; }
+    .foot-links a:hover { color: var(--text); }
+
+    @media (max-width: 880px) {
+      .nav-links { display: none; }
+      .stats { grid-template-columns: repeat(2,1fr); }
+      .grid, .steps { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap nav">
+      <a class="logo" href="/">
+        <span class="mark">S</span> SmartSupply
+      </a>
+      <nav class="nav-links">
+        <a href="#features">Funciones</a>
+        <a href="#como">Cómo funciona</a>
+        <a href="#cta">Empezar</a>
+        <a class="btn btn-ghost" href="https://app.smartsupply.mx">Iniciar sesión</a>
+      </nav>
+      <a class="btn btn-primary" href="https://app.smartsupply.mx" style="display:none" id="mnav">Entrar</a>
+    </div>
+  </header>
+
+  <main>
+    <!-- HERO -->
+    <section class="hero">
+      <div class="wrap">
+        <span class="pill"><span class="dot"></span> CFDI 4.0 · Timbrado autorizado por el SAT</span>
+        <h1>Facturas <span class="grad">inteligentes</span><br />en línea</h1>
+        <p class="sub">Timbra CFDI 4.0, emite remisiones y controla tu inventario multi-sucursal desde una sola plataforma. Hecho para empresas que venden en México.</p>
+        <div class="hero-cta">
+          <a class="btn btn-primary" href="https://app.smartsupply.mx">Entrar al sistema →</a>
+          <a class="btn btn-ghost" href="#features">Ver funciones</a>
+        </div>
+        <div class="trust">
+          <span><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg> Multi-empresa y multi-sucursal</span>
+          <span><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg> Datos aislados por compañía</span>
+          <span><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg> Envío de remisiones por correo</span>
+        </div>
+
+        <div class="stats">
+          <div class="stat"><div class="num">CFDI 4.0</div><div class="lbl">Timbrado vigente</div></div>
+          <div class="stat"><div class="num">100%</div><div class="lbl">En la nube</div></div>
+          <div class="stat"><div class="num">Multi</div><div class="lbl">Sucursal e inventario</div></div>
+          <div class="stat"><div class="num">24/7</div><div class="lbl">Acceso desde cualquier lugar</div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- FEATURES -->
+    <section id="features">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="eyebrow">Todo en un lugar</span>
+          <h2>Facturación, ventas e inventario conectados</h2>
+          <p>Deja las hojas de cálculo y los sistemas sueltos. SmartSupply integra tu operación de principio a fin.</p>
+        </div>
+        <div class="grid">
+          <div class="card">
+            <div class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h6"/></svg></div>
+            <h3>Timbrado CFDI 4.0</h3>
+            <p>Genera y timbra facturas válidas ante el SAT en segundos, con tus datos de emisor y CSD configurados.</p>
+          </div>
+          <div class="card">
+            <div class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 17V7l6 5z"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg></div>
+            <h3>Remisiones</h3>
+            <p>Emite, imprime y envía remisiones por correo al cliente. Captura ágil con teclado y series de folios.</p>
+          </div>
+          <div class="card">
+            <div class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="m3.3 7 8.7 5 8.7-5M12 22V12"/></svg></div>
+            <h3>Inventario en tiempo real</h3>
+            <p>Controla existencias por almacén y sucursal: actual y en tránsito, con movimientos de compra y ajuste.</p>
+          </div>
+          <div class="card">
+            <div class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg></div>
+            <h3>Listas de precios y cotizador</h3>
+            <p>Define listas de precios y arma cotizaciones al instante, listas para convertirse en venta.</p>
+          </div>
+          <div class="card">
+            <div class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13A4 4 0 0 1 16 11"/></svg></div>
+            <h3>Multi-empresa y roles</h3>
+            <p>Administra varias compañías con sus usuarios y permisos. Cada empresa ve solo sus propios datos.</p>
+          </div>
+          <div class="card">
+            <div class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
+            <h3>Seguridad por diseño</h3>
+            <p>Identidad verificada por token y aislamiento de datos por compañía a nivel de base de datos.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- COMO FUNCIONA -->
+    <section id="como" style="background:var(--bg-soft); border-top:1px solid var(--border); border-bottom:1px solid var(--border);">
+      <div class="wrap">
+        <div class="sec-head">
+          <span class="eyebrow">Cómo funciona</span>
+          <h2>De la venta a la factura en 3 pasos</h2>
+        </div>
+        <div class="steps">
+          <div class="step">
+            <div class="n">1</div>
+            <h3>Configura tu empresa</h3>
+            <p>Carga tus datos de emisor, tu CSD y tus series de folios. Tu cuenta queda lista para operar.</p>
+          </div>
+          <div class="step">
+            <div class="n">2</div>
+            <h3>Registra ventas y remisiones</h3>
+            <p>Captura productos con inventario en vivo, genera remisiones y envíalas al cliente por correo.</p>
+          </div>
+          <div class="step">
+            <div class="n">3</div>
+            <h3>Timbra tu factura</h3>
+            <p>Convierte en CFDI 4.0 válido ante el SAT y descárgalo o envíalo, todo desde la misma pantalla.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- CTA -->
+    <section id="cta">
+      <div class="wrap">
+        <div class="cta-box">
+          <h2>Empieza a facturar inteligente</h2>
+          <p>Accede a tu cuenta de SmartSupply y lleva tu facturación, ventas e inventario al mismo lugar.</p>
+          <a class="btn btn-primary" href="https://app.smartsupply.mx" style="font-size:15px; padding:14px 26px;">Entrar al sistema →</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap foot">
+      <div class="logo"><span class="mark">S</span> SmartSupply</div>
+      <div class="foot-links">
+        <a href="https://app.smartsupply.mx">Iniciar sesión</a>
+        <a href="#features">Funciones</a>
+        <a href="#como">Cómo funciona</a>
+      </div>
+      <div>© <span id="yr"></span> SmartSupply · Facturas Inteligentes en Línea</div>
+    </div>
+  </footer>
+
+  <script>
+    document.getElementById('yr').textContent = new Date().getFullYear();
+  </script>
+</body>
+</html>

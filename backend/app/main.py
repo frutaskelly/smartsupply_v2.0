@@ -21,6 +21,7 @@ from .api.v1 import (
     memberships,
     ordenes_compra,
     permissions,
+    platform,
     precios,
     productos,
     proveedores,
@@ -102,3 +103,5 @@ app.include_router(precios.router, prefix="/api/v1")
 app.include_router(series.router, prefix="/api/v1")
 # correo SMTP del tenant
 app.include_router(correo.router, prefix="/api/v1")
+# panel de operador de plataforma — cross-tenant, read-only, allowlist
+app.include_router(platform.router, prefix="/api/v1")

@@ -1,0 +1,83 @@
+# SmartSupply v2.0 — stack de PRODUCCIÓN.
+#
+# Imágenes autocontenidas (sin bind-mount del código) servidas a internet vía
+# el Cloudflare Tunnel compartido (cadena_tunnel). El backend usa la DB CLOUD
+# de Supabase (no el postgres local). Levantar con:
+#
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Hostnames (ingress del túnel):
+#   smartsupply.mx        → landing  (nginx)
+#   app.smartsupply.mx    → frontend (Next.js)
+#   admin.smartsupply.mx  → frontend (Next.js, middleware → /admin)
+#   api.smartsupply.mx    → backend  (FastAPI)
+name: smartsupplyv2
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: smartsupplyv2_redis
+    restart: unless-stopped
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [ssv2]
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: smartsupplyv2-backend:prod
+    container_name: smartsupplyv2_backend
+    restart: unless-stopped
+    # Secrets vienen del .env (gitignored). Las claves de abajo lo sobreescriben
+    # para producción: DB en la nube, CORS de dominios reales, env=production.
+    env_file:
+      - .env
+    environment:
+      ENVIRONMENT: production
+      DATABASE_URL: postgresql+psycopg2://postgres:Lxh95hTkkoksLwEy@db.qwffsaxoeehwwdzaytqb.supabase.co:5432/postgres
+      DATABASE_URL_ASYNC: postgresql+asyncpg://postgres:Lxh95hTkkoksLwEy@db.qwffsaxoeehwwdzaytqb.supabase.co:5432/postgres
+      REDIS_URL: redis://redis:6379/0
+      ALLOWED_ORIGINS: "https://app.smartsupply.mx,https://admin.smartsupply.mx,https://smartsupply.mx,https://api.smartsupply.mx"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks: [ssv2]
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # NEXT_PUBLIC_* se hornean en build-time → apuntan al API público.
+        NEXT_PUBLIC_API_URL: https://api.smartsupply.mx
+        NEXT_PUBLIC_SUPABASE_URL: https://qwffsaxoeehwwdzaytqb.supabase.co
+        NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_tgJ_GhSa9ZtHvysc-HPH1g_4V1bjKDb
+    image: smartsupplyv2-frontend:prod
+    container_name: smartsupplyv2_frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    networks: [ssv2]
+
+  landing:
+    build:
+      context: ./landing
+      dockerfile: Dockerfile
+    image: smartsupplyv2-landing:prod
+    container_name: smartsupplyv2_landing
+    restart: unless-stopped
+    networks: [ssv2]
+
+volumes:
+  redisdata:
+    driver: local
+
+networks:
+  ssv2:
+    name: smartsupplyv2_network
