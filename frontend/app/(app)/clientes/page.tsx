@@ -179,6 +179,7 @@ const config: CrudConfig<Cliente> = {
       type: "select",
       required: true,
       options: REGIMEN_FISCAL_OPTS,
+      colSpan: 2,
     },
     {
       name: "uso_cfdi_default",
@@ -187,6 +188,7 @@ const config: CrudConfig<Cliente> = {
       required: true,
       options: USO_CFDI_OPTS,
       hint: "Predeterminado al generar facturas para este cliente",
+      colSpan: 2,
     },
     {
       name: "forma_pago_default",
@@ -194,6 +196,7 @@ const config: CrudConfig<Cliente> = {
       type: "select",
       required: true,
       options: FORMA_PAGO_OPTS,
+      colSpan: 2,
     },
     {
       name: "metodo_pago_default",
@@ -202,6 +205,7 @@ const config: CrudConfig<Cliente> = {
       required: true,
       options: METODO_PAGO_OPTS,
       hint: "PUE exige una forma de pago real (no 99); PPD permite 99 — Por definir",
+      colSpan: 2,
     },
     { name: "calle", label: "Calle y número", colSpan: 2 },
     { name: "colonia", label: "Colonia" },

@@ -171,7 +171,12 @@ export function Select({
     if (open && filterable) filterRef.current?.focus();
   }, [open, filterable]);
 
-  // Cierre por clic fuera, Escape, scroll o resize (evita que el panel quede a la deriva).
+  // Cierre por clic fuera, Escape, scroll de la página o resize (evita que el
+  // panel quede a la deriva si el trigger se mueve). El listener de scroll usa
+  // fase de captura porque `scroll` no burbujea — pero eso también lo dispara
+  // al scrollear la LISTA PROPIA del panel (su `overflow-auto` interno), lo
+  // que cerraba el dropdown en vez de dejarlo scrollear. Se ignora cuando el
+  // scroll viene de dentro del panel mismo.
   useEffect(() => {
     if (!open) return;
     function onDown(e: MouseEvent) {
@@ -182,13 +187,18 @@ export function Select({
     function onClose() {
       setOpen(false);
     }
+    function onWindowScroll(e: Event) {
+      const t = e.target;
+      if (t instanceof Node && panelRef.current?.contains(t)) return;
+      setOpen(false);
+    }
     document.addEventListener("mousedown", onDown);
     window.addEventListener("resize", onClose);
-    window.addEventListener("scroll", onClose, true);
+    window.addEventListener("scroll", onWindowScroll, true);
     return () => {
       document.removeEventListener("mousedown", onDown);
       window.removeEventListener("resize", onClose);
-      window.removeEventListener("scroll", onClose, true);
+      window.removeEventListener("scroll", onWindowScroll, true);
     };
   }, [open]);
 

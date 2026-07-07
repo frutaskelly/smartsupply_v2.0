@@ -28,20 +28,30 @@ export function Modal({
 
   if (!open) return null;
 
+  // Posición fija (no flex/margin-auto, no transform): `resize` asume que la
+  // esquina superior-izquierda queda quieta y solo width/height crecen. Un
+  // contenedor que recentra (flex/margin:auto/translate(-50%)) recalcula la
+  // posición en cada frame del arrastre, peleando contra el resize — crecía a
+  // medias hacia la derecha y podía "desaparecer" al crecer hacia abajo.
+  // `left`/`top` de abajo son constantes (no dependen del tamaño propio del
+  // modal), calculadas para que arranque centrado según su ancho máximo.
+  const maxWidthRem = wide ? 48 : 32; // max-w-3xl / max-w-lg, en rem
+
   return (
-    <div
-      className="fixed inset-0 z-40 flex items-center justify-center bg-black/30 p-4"
-      onClick={onClose}
-    >
+    <div className="fixed inset-0 z-40 bg-black/30" onClick={onClose}>
       <div
+        style={{
+          left: `max(1rem, calc(50vw - ${maxWidthRem / 2}rem))`,
+          top: "6vh",
+          maxWidth: `min(calc(100vw - 2rem), ${maxWidthRem}rem)`,
+        }}
         // `resize` + `overflow-hidden` habilita el asa nativa del navegador en la
         // esquina inferior derecha (líneas diagonales) para agrandar/achicar el
         // modal hacia abajo y hacia la derecha. min-w/min-h evitan que se pueda
-        // arrastrar hasta desaparecer; max-w/max-h son el tamaño de arranque y
-        // también el tope al agrandar.
-        className={`relative flex max-h-[90vh] min-h-[16rem] w-full min-w-[22rem] ${
-          wide ? "max-w-3xl" : "max-w-lg"
-        } resize flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-xl`}
+        // arrastrar hasta desaparecer; max-width es el tamaño de arranque y
+        // también el tope al agrandar (con clamp aparte para no desbordar en
+        // pantallas angostas).
+        className="fixed flex max-h-[90vh] min-h-[16rem] w-full min-w-[22rem] resize flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex shrink-0 items-center justify-between border-b border-border px-5 py-3">
