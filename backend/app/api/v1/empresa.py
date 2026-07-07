@@ -22,7 +22,7 @@ from ...core.db import get_db
 from ...core.rbac import AuthContext, require_permission
 from ...models import Tenant
 from ...schemas.empresa import EmpresaOnboardingOut, EmpresaOut, EmpresaUpdate
-from ...services.facturama import FacturamaClient, FacturamaError
+from ...services.facturama import FacturamaClient, FacturamaError, csd_public_fields
 from ...services.onboarding import compute_status
 
 router = APIRouter(prefix="/empresa", tags=["empresa"])
@@ -117,7 +117,7 @@ def listar_csd(
     client = FacturamaClient.from_settings(settings)
     if not client.configured:
         raise HTTPException(status_code=503, detail="Facturama no está configurado")
-    return client.listar_csds()
+    return csd_public_fields(client.listar_csds())
 
 
 @router.get("/onboarding", response_model=EmpresaOnboardingOut)

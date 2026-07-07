@@ -15,6 +15,7 @@ import { KeyboardCombobox, type ComboOption } from "@/components/KeyboardCombobo
 import { OnboardingChecklist, useOnboarding } from "@/components/OnboardingChecklist";
 import { ApiError, apiFetch } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
+import { fmtDate } from "@/lib/format";
 import { getSupabase } from "@/lib/supabaseClient";
 
 const WRITE = "membership:gestionar";
@@ -511,7 +512,7 @@ export default function EmpresaPage() {
                       <td className="py-1.5 pr-3">{c.Rfc ?? c.rfc ?? "—"}</td>
                       <td className="py-1.5 pr-3">{c.SerialNumber ?? c.Serial ?? "—"}</td>
                       <td className="py-1.5">
-                        {c.CsdCerExpirationDate ?? c.ExpirationDate ?? "—"}
+                        {fmtDate((c.ExpirationDate ?? c.CsdCerExpirationDate) as string | undefined)}
                       </td>
                     </tr>
                   ))}

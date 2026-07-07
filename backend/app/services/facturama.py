@@ -166,7 +166,13 @@ class FacturamaClient:
             return r.json()
 
     def listar_csds(self) -> list:
-        """Lista los CSD cargados en Facturama. [] si error o no 200."""
+        """Lista los CSD cargados en Facturama. [] si error o no 200.
+
+        Incluye el certificado y la llave privada tal cual los devuelve
+        Facturama — uso interno (p. ej. `_csd_match` en onboarding.py). Para
+        exponer al cliente HTTP usar `csd_public_fields`, que retira los
+        campos sensibles.
+        """
         try:
             with self._client() as c:
                 r = c.get("/api-lite/csds")
@@ -176,6 +182,41 @@ class FacturamaClient:
                 return data if isinstance(data, list) else []
         except (FacturamaError, Exception):  # noqa: BLE001 — listado tolerante
             return []
+
+
+def csd_serial_number(certificate_b64: str) -> Optional[str]:
+    """Número de serie legible del CSD (convención SAT: el entero ASN.1 del
+    serialNumber, leído como bytes ASCII, es el número que muestra el SAT)."""
+    try:
+        from cryptography import x509
+
+        cert = x509.load_der_x509_certificate(base64.b64decode(certificate_b64))
+        n = cert.serial_number
+        return n.to_bytes((n.bit_length() + 7) // 8, "big").decode("ascii")
+    except Exception:  # noqa: BLE001 — best-effort, no debe romper el listado
+        return None
+
+
+def csd_public_fields(csds: list) -> list[dict]:
+    """Campos seguros de mostrar al cliente: RFC, serie y vigencia.
+
+    Nunca incluir `Certificate`/`PrivateKey`/`PrivateKeyPassword` — son la
+    llave privada del emisor y su contraseña; Facturama los devuelve en el
+    listado pero no deben llegar al navegador.
+    """
+    out = []
+    for c in csds or []:
+        if not isinstance(c, dict):
+            continue
+        cert_b64 = c.get("Certificate") or ""
+        out.append(
+            {
+                "Rfc": c.get("Rfc"),
+                "SerialNumber": csd_serial_number(cert_b64) if cert_b64 else None,
+                "ExpirationDate": c.get("CsdExpirationDate"),
+            }
+        )
+    return out
 
     def download_pdf(self, cfdi_id: str) -> bytes:
         with self._client() as c:
