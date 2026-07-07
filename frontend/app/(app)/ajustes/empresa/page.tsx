@@ -1,14 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Building2, CheckCircle2, Eye, EyeOff, Pencil, ShieldCheck, Upload } from "lucide-react";
+import { Building2, CheckCircle2, Pencil, ShieldCheck, Upload } from "lucide-react";
 
 import { Alert } from "@/components/ui/Alert";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { Field, Input, Select } from "@/components/ui/Field";
+import { Field, Input, PasswordInput, Select } from "@/components/ui/Field";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { useToast } from "@/components/ui/Toast";
 import { KeyboardCombobox, type ComboOption } from "@/components/KeyboardCombobox";
@@ -138,7 +138,6 @@ export default function EmpresaPage() {
   const [cerFile, setCerFile] = useState<File | null>(null);
   const [keyFile, setKeyFile] = useState<File | null>(null);
   const [csdPassword, setCsdPassword] = useState("");
-  const [showCsdPassword, setShowCsdPassword] = useState(false);
   const [uploading, setUploading] = useState(false);
 
   function loadCsds() {
@@ -466,24 +465,11 @@ export default function EmpresaPage() {
                 />
               </Field>
               <Field label="Contraseña de la llave privada">
-                <div className="relative">
-                  <Input
-                    type={showCsdPassword ? "text" : "password"}
-                    value={csdPassword}
-                    onChange={(e) => setCsdPassword(e.target.value)}
-                    disabled={uploading}
-                    className="pr-9"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowCsdPassword((v) => !v)}
-                    disabled={uploading}
-                    aria-label={showCsdPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
-                    className="absolute inset-y-0 right-0 flex items-center px-2.5 text-muted hover:text-foreground disabled:opacity-60"
-                  >
-                    {showCsdPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                  </button>
-                </div>
+                <PasswordInput
+                  value={csdPassword}
+                  onChange={(e) => setCsdPassword(e.target.value)}
+                  disabled={uploading}
+                />
               </Field>
               <div className="flex items-end">
                 <Button onClick={subirCsd} disabled={uploading}>

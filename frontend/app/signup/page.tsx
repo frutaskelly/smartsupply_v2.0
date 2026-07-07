@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
-import { Field, Input, Select } from "@/components/ui/Field";
+import { Field, Input, PasswordInput, Select } from "@/components/ui/Field";
 import { ApiError, apiFetch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { getSupabase } from "@/lib/supabaseClient";
@@ -254,8 +254,7 @@ export default function SignupPage() {
             />
           </Field>
           <Field label="Contraseña" required>
-            <Input
-              type="password"
+            <PasswordInput
               autoComplete="new-password"
               required
               minLength={8}

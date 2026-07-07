@@ -11,7 +11,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
-import { Check, ChevronDown, Search } from "lucide-react";
+import { Check, ChevronDown, Eye, EyeOff, Search } from "lucide-react";
 import type {
   ChangeEvent,
   InputHTMLAttributes,
@@ -56,6 +56,29 @@ export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputE
 export function Textarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
   const { className = "", ...rest } = props;
   return <textarea {...rest} className={`${BASE} ${className}`} />;
+}
+
+/** Input de contraseña con ojo de mostrar/ocultar. */
+export function PasswordInput({
+  className = "",
+  disabled,
+  ...rest
+}: InputHTMLAttributes<HTMLInputElement>) {
+  const [show, setShow] = useState(false);
+  return (
+    <div className="relative">
+      <Input type={show ? "text" : "password"} disabled={disabled} className={`pr-9 ${className}`} {...rest} />
+      <button
+        type="button"
+        onClick={() => setShow((v) => !v)}
+        disabled={disabled}
+        aria-label={show ? "Ocultar contraseña" : "Mostrar contraseña"}
+        className="absolute inset-y-0 right-0 flex items-center px-2.5 text-muted hover:text-foreground disabled:opacity-60"
+      >
+        {show ? <EyeOff size={16} /> : <Eye size={16} />}
+      </button>
+    </div>
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
