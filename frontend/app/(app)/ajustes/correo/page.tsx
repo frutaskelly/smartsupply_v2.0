@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Mail, Send, Sparkles } from "lucide-react";
+import { ExternalLink, Mail, Send, Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
 import { Field, Input, Select } from "@/components/ui/Field";
@@ -154,13 +154,43 @@ export default function CorreoPage() {
       />
 
       <div className="max-w-2xl space-y-4 rounded-xl border border-border p-4">
-        <div className="flex items-start gap-2 rounded-lg bg-surface-2 p-3 text-sm text-muted">
-          <Mail size={16} className="mt-0.5 shrink-0" />
-          <span>
-            <strong>Gmail:</strong> usa una Contraseña de aplicación (activa 2FA en
-            tu cuenta), servidor <code>smtp.gmail.com</code>, puerto 465 (SSL) o 587
-            (TLS).
-          </span>
+        <div className="rounded-lg bg-surface-2 p-3 text-sm">
+          <div className="mb-2 flex items-center gap-2 font-medium">
+            <Mail size={16} /> Cómo conectar una cuenta de Gmail
+          </div>
+          <ol className="ml-4 list-decimal space-y-1.5 text-muted">
+            <li>Abre la cuenta de Gmail desde la que se van a enviar los correos.</li>
+            <li>
+              Activa la verificación en dos pasos (2FA) en{" "}
+              <a
+                href="https://myaccount.google.com/security"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-0.5 font-medium text-accent hover:underline"
+              >
+                myaccount.google.com/security <ExternalLink size={12} />
+              </a>
+              .
+            </li>
+            <li>
+              Genera una contraseña de aplicación en{" "}
+              <a
+                href="https://myaccount.google.com/apppasswords"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-0.5 font-medium text-accent hover:underline"
+              >
+                myaccount.google.com/apppasswords <ExternalLink size={12} />
+              </a>
+              .
+            </li>
+            <li>
+              Pega esos 16 caracteres en <strong>Contraseña</strong> (abajo). Usa{" "}
+              <strong>Preset Gmail</strong> para autocompletar servidor/puerto, y pon
+              tu correo completo en <strong>Usuario</strong> y en{" "}
+              <strong>Remitente (email)</strong> — Gmail exige que sean el mismo.
+            </li>
+          </ol>
         </div>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -180,7 +210,7 @@ export default function CorreoPage() {
               disabled={!canWrite || loading}
             />
           </Field>
-          <Field label="Usuario" required hint="Normalmente tu correo completo">
+          <Field label="Usuario" required hint="Tu correo completo (con el que te autenticas)">
             <Input
               placeholder="ventas@empresa.com"
               value={form.username}
@@ -205,13 +235,33 @@ export default function CorreoPage() {
               disabled={!canWrite || loading}
             />
           </Field>
-          <Field label="Remitente (email)" required>
-            <Input
-              placeholder="ventas@empresa.com"
-              value={form.from_email}
-              onChange={(e) => set({ from_email: e.target.value })}
-              disabled={!canWrite || loading}
-            />
+          <Field
+            label="Remitente (email)"
+            required
+            hint={
+              form.username && form.from_email !== form.username
+                ? "En Gmail debe ser el mismo correo que Usuario"
+                : undefined
+            }
+          >
+            <div className="flex gap-2">
+              <Input
+                placeholder="ventas@empresa.com"
+                value={form.from_email}
+                onChange={(e) => set({ from_email: e.target.value })}
+                disabled={!canWrite || loading}
+              />
+              {form.username && form.from_email !== form.username && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => set({ from_email: form.username })}
+                  disabled={!canWrite || loading}
+                >
+                  Igual que Usuario
+                </Button>
+              )}
+            </div>
           </Field>
           <Field label="Conexión segura">
             <Select
