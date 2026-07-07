@@ -159,6 +159,10 @@ class FacturamaClient:
             if r.status_code >= 400:
                 log.error("Facturama /api-lite/csds %s | RESPONSE=%s", r.status_code, r.text[:1000])
                 raise FacturamaError(f"subir_csd failed: {r.status_code} {r.text[:500]}")
+            # Facturama a veces responde 200 con cuerpo vacío (sin JSON) — éxito
+            # igual; no hay nada que parsear ni que el llamador necesite leer.
+            if not r.text.strip():
+                return {"Rfc": rfc}
             return r.json()
 
     def listar_csds(self) -> list:
