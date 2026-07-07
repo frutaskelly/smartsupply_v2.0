@@ -98,3 +98,6 @@ class ConfirmarRemisionIn(BaseModel):
     """Cuerpo opcional al confirmar: pesos reales por línea (peso variable).
     Si no se envía, se reserva el estimado cantidad×factor."""
     pesos: Optional[list[PesoLinea]] = None
+    # Permite confirmar aunque no haya existencia suficiente; el inventario
+    # disponible queda en negativo (venta sin stock / sobregiro autorizado).
+    permitir_negativos: bool = False

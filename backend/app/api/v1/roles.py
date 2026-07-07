@@ -17,7 +17,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from ...core.rbac import AuthContext, get_tenant_db, require_permission
+from ...core.rbac import AuthContext, get_tenant_db, invalidate_auth_cache, require_permission
 from ...models import Membership, Permission, Role, RolePermission
 from ...schemas.role import (
     RoleCreate,
@@ -136,6 +136,7 @@ def update_role(
     flush_or_conflict(db, detail=_DUP)
     if perms is not None:
         _set_permissions(db, role.id, perms)
+        invalidate_auth_cache()  # permisos del rol cambiaron → refresca caché
     db.refresh(role)
     return _detail(db, role)
 
@@ -150,6 +151,7 @@ def set_role_permissions(
     role = get_or_404(db, Role, role_id)
     _editable_or_403(role, ctx)
     _set_permissions(db, role.id, payload.permissions)
+    invalidate_auth_cache()  # permisos del rol cambiaron → refresca caché
     db.refresh(role)
     return _detail(db, role)
 

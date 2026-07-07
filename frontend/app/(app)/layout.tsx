@@ -1,17 +1,19 @@
 "use client";
 
 import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
 import { Sidebar } from "@/components/Sidebar";
 import { Topbar } from "@/components/Topbar";
+import { OnboardingBanner } from "@/components/OnboardingBanner";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { session, me, loading, accessError, signOut } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
     if (!loading && !session) router.replace("/login");
@@ -47,7 +49,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <Sidebar me={me} />
       <div className="flex flex-1 flex-col overflow-hidden">
         <Topbar me={me} onSignOut={signOut} />
-        <main className="flex-1 overflow-auto bg-surface p-6">{children}</main>
+        <main className="flex-1 overflow-auto bg-surface p-6">
+          <div className="mb-4">
+            <OnboardingBanner pathname={pathname} />
+          </div>
+          {children}
+        </main>
       </div>
     </div>
   );

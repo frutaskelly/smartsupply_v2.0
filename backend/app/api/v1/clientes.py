@@ -80,7 +80,7 @@ def validar_rfc(
 
     client = FacturamaClient.from_settings(settings)
     if not client.configured:
-        raise HTTPException(status_code=503, detail="Facturama (sandbox) no está configurado")
+        raise HTTPException(status_code=503, detail="Facturama no está configurado")
     try:
         return client.validar_rfc(rfc_u)
     except FacturamaError as exc:

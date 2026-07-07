@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from . import __version__
 from .core.config import settings
+from .services.facturama import startup_warnings as facturama_startup_warnings
 from .api.v1 import (
     almacenes,
     auth,
@@ -14,6 +15,7 @@ from .api.v1 import (
     clientes,
     conversiones,
     correo,
+    empresa,
     esquemas_impuesto,
     facturas,
     inventario,
@@ -25,6 +27,7 @@ from .api.v1 import (
     precios,
     productos,
     proveedores,
+    registro,
     remisiones,
     roles,
     sat,
@@ -38,11 +41,18 @@ log = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    facturama_env = (
+        "producción" if "apisandbox.facturama.mx" not in settings.FACTURAMA_BASE_URL
+        else "sandbox"
+    )
     log.info(
-        "SmartSupply v2.0 starting — env=%s, origins=%s",
+        "SmartSupply v2.0 starting — env=%s, facturama=%s, origins=%s",
         settings.ENVIRONMENT,
+        facturama_env,
         settings.allowed_origins_list(),
     )
+    for w in facturama_startup_warnings(settings):
+        log.warning("Facturama config: %s", w)
     yield
     log.info("Shutting down")
 
@@ -77,6 +87,7 @@ def api_root() -> dict:
 
 # ─── API v1 routers ───────────────────────────────────────────────────────────
 app.include_router(auth.router, prefix="/api/v1")
+app.include_router(registro.router, prefix="/api/v1")  # PÚBLICO (signup autoservicio)
 # Phase 3 — catálogo / master data
 app.include_router(categorias.router, prefix="/api/v1")
 app.include_router(esquemas_impuesto.router, prefix="/api/v1")
@@ -105,3 +116,5 @@ app.include_router(series.router, prefix="/api/v1")
 app.include_router(correo.router, prefix="/api/v1")
 # panel de operador de plataforma — cross-tenant, read-only, allowlist
 app.include_router(platform.router, prefix="/api/v1")
+# empresa / emisor — datos fiscales del tenant + CSD
+app.include_router(empresa.router, prefix="/api/v1")

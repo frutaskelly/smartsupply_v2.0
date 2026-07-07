@@ -2,12 +2,13 @@
 
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 
-type Variant = "primary" | "secondary" | "danger" | "ghost";
+type Variant = "primary" | "secondary" | "danger" | "success" | "ghost";
 
 const VARIANTS: Record<Variant, string> = {
   primary: "bg-accent text-white hover:opacity-90",
   secondary: "border border-border bg-background hover:bg-surface-2",
   danger: "bg-danger text-white hover:opacity-90",
+  success: "bg-success text-white hover:opacity-90",
   ghost: "text-muted hover:bg-surface-2 hover:text-foreground",
 };
 

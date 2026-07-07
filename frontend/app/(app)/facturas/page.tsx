@@ -3,12 +3,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { Download, FileCode2, Plus, Stamp, X } from "lucide-react";
 
+import { Alert } from "@/components/ui/Alert";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { DataTable, type Column, type RowAction } from "@/components/ui/DataTable";
 import { DataTableSmart } from "@/components/ui/DataTableSmart";
-import { Checkbox, Field, Select } from "@/components/ui/Field";
+import { Checkbox, Field, Input, Select } from "@/components/ui/Field";
 import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Spinner } from "@/components/ui/Spinner";
@@ -88,6 +89,11 @@ export default function FacturasPage() {
   const [detalleLoading, setDetalleLoading] = useState<Set<string>>(new Set());
   const [toTimbrar, setToTimbrar] = useState<Factura | null>(null);
   const [toCancel, setToCancel] = useState<Factura | null>(null);
+  // Motivo de cancelación SAT (01–04). 01 requiere UUID de la factura que
+  // sustituye; 03 ("no se llevó a cabo") es el único que libera el inventario
+  // reservado por las remisiones (backend _release_remision_stock).
+  const [cancelMotivo, setCancelMotivo] = useState("02");
+  const [cancelSustitucion, setCancelSustitucion] = useState("");
   const [actBusy, setActBusy] = useState(false);
 
   async function verDetalle(f: Factura) {
@@ -156,12 +162,23 @@ export default function FacturasPage() {
       toast.error(e instanceof ApiError ? e.message : "No se pudo timbrar");
     } finally { setActBusy(false); }
   }
+  function abrirCancelar(f: Factura) {
+    setCancelMotivo("02");
+    setCancelSustitucion("");
+    setToCancel(f);
+  }
   async function cancelar() {
     if (!toCancel) return;
+    if (cancelMotivo === "01" && !cancelSustitucion.trim()) {
+      toast.error("El motivo 01 requiere el UUID de la factura que sustituye");
+      return;
+    }
     setActBusy(true);
     try {
+      const body: { motivo: string; uuid_sustitucion?: string } = { motivo: cancelMotivo };
+      if (cancelMotivo === "01") body.uuid_sustitucion = cancelSustitucion.trim();
       await apiFetch(`/api/v1/facturas/${toCancel.id}/cancelar`, {
-        method: "POST", body: JSON.stringify({ motivo: "02" }),
+        method: "POST", body: JSON.stringify(body),
       });
       toast.success("Factura cancelada (sandbox)");
       invalidar(toCancel.id);
@@ -194,7 +211,7 @@ export default function FacturasPage() {
     { id: "xml", label: "Descargar XML", icon: <FileCode2 size={15} />,
       onClick: (f) => { void descargar(f, "xml"); }, hidden: (f) => f.estado !== "TIMBRADA" },
     { id: "cancelar", label: "Cancelar", icon: <X size={15} />, tone: "danger",
-      onClick: (f) => setToCancel(f), hidden: (f) => !(canWrite && f.estado === "TIMBRADA") },
+      onClick: (f) => abrirCancelar(f), hidden: (f) => !(canWrite && f.estado === "TIMBRADA") },
   ];
 
   return (
@@ -262,9 +279,45 @@ export default function FacturasPage() {
       <ConfirmDialog open={toTimbrar !== null} title="Timbrar factura (sandbox)"
         message={`¿Timbrar ${toTimbrar?.serie}${toTimbrar?.folio}? Se enviará al PAC en modo sandbox (prueba).`}
         onConfirm={timbrar} onClose={() => setToTimbrar(null)} loading={actBusy} />
-      <ConfirmDialog open={toCancel !== null} title="Cancelar factura"
-        message={`¿Cancelar ${toCancel?.serie}${toCancel?.folio} ante el PAC (sandbox)?`}
-        onConfirm={cancelar} onClose={() => setToCancel(null)} loading={actBusy} />
+      <Modal
+        open={toCancel !== null}
+        onClose={() => setToCancel(null)}
+        title={`Cancelar factura ${toCancel?.serie ?? ""}${toCancel?.folio ?? ""}`}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setToCancel(null)} disabled={actBusy}>Cerrar</Button>
+            <Button variant="danger" onClick={() => { void cancelar(); }} disabled={actBusy}>
+              {actBusy ? "Cancelando…" : "Cancelar factura"}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <Field label="Motivo de cancelación (SAT)">
+            <Select value={cancelMotivo} onChange={(e) => setCancelMotivo(e.target.value)}>
+              <option value="01">01 — Comprobante emitido con errores con relación</option>
+              <option value="02">02 — Comprobante emitido con errores sin relación</option>
+              <option value="03">03 — No se llevó a cabo la operación</option>
+              <option value="04">04 — Operación nominativa en factura global</option>
+            </Select>
+          </Field>
+          {cancelMotivo === "01" && (
+            <Field label="UUID de la factura que sustituye" required>
+              <Input
+                placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                value={cancelSustitucion}
+                onChange={(e) => setCancelSustitucion(e.target.value)}
+              />
+            </Field>
+          )}
+          {cancelMotivo === "03" && (
+            <Alert tone="warning">
+              El motivo 03 libera el inventario reservado por las remisiones de esta factura
+              (vuelven a estar disponibles para refacturar).
+            </Alert>
+          )}
+        </div>
+      </Modal>
     </div>
   );
 }
