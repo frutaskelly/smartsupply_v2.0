@@ -1,7 +1,17 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Eye, Pencil, Plus, Trash2 } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowRight,
+  Check,
+  CheckCircle2,
+  Circle,
+  Eye,
+  Pencil,
+  Plus,
+  Trash2,
+} from "lucide-react";
 
 import { Alert } from "@/components/ui/Alert";
 import { Badge } from "@/components/ui/Badge";
@@ -16,6 +26,8 @@ import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { SearchBox, SearchSelect, type SearchOption } from "@/components/ui/SearchBox";
 import { ProductoCombobox } from "@/components/ProductoCombobox";
+import { ComingSoon } from "@/components/ComingSoon";
+import { KeyboardCombobox, type ComboOption } from "@/components/KeyboardCombobox";
 import { Spinner } from "@/components/ui/Spinner";
 import { Tabs } from "@/components/ui/Tabs";
 import { useToast } from "@/components/ui/Toast";
@@ -39,6 +51,22 @@ const DEMO_ROWS: Demo[] = [
   { id: 6, nombre: "Papel higiénico 4 rollos", estado: "Inactivo" },
 ];
 
+const PRESENTACIONES: ComboOption[] = [
+  { value: "KGM", label: "Kilogramo" },
+  { value: "H87", label: "Pieza" },
+  { value: "XBX", label: "Caja" },
+  { value: "XPK", label: "Paquete" },
+  { value: "LTR", label: "Litro" },
+];
+
+// Pasos de ejemplo para la réplica visual del checklist de onboarding.
+const ONBOARDING_PASOS = [
+  { titulo: "Datos fiscales del emisor", detalle: "Razón social, RFC, régimen y CP.", completo: true },
+  { titulo: "Certificado de sello digital (CSD)", detalle: "Sube el .cer + .key y su contraseña.", completo: true },
+  { titulo: "Serie de folios", detalle: "Define la serie por defecto para tus facturas.", completo: false },
+  { titulo: "Primer cliente con RFC válido", detalle: "Valida el RFC contra el padrón del SAT.", completo: false },
+];
+
 const UNIDADES_SAT: SearchOption[] = [
   { value: "KGM", label: "Kilogramo", hint: "KGM" },
   { value: "H87", label: "Pieza", hint: "H87" },
@@ -59,6 +87,7 @@ export default function SistemaDisenoPage() {
   const [busqueda, setBusqueda] = useState("");
   const [prodSel, setProdSel] = useState<string | null>(null);
   const [unidadSat, setUnidadSat] = useState<string | null>("KGM");
+  const [kb, setKb] = useState("KGM");
   const [sel, setSel] = useState("a");
 
   const cols: Column<Demo>[] = [
@@ -266,6 +295,108 @@ export default function SistemaDisenoPage() {
             </p>
           </div>
         </div>
+      </Card>
+
+      {/* KeyboardCombobox */}
+      <Card
+        title="KeyboardCombobox"
+        subtitle="Combobox 100% teclado — para flujos encadenados de alta rápida"
+      >
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
+            <p className="mb-2 text-xs text-muted">
+              Enfoca y abre; escribe para filtrar; <b>↑/↓</b> resaltan, <b>Enter</b> selecciona y avanza,
+              <b> ←/→</b> saltan entre campos. Usado en el alta por teclado (remisiones/compras) para capturar
+              líneas sin tocar el mouse.
+            </p>
+            <div className="max-w-xs">
+              <KeyboardCombobox options={PRESENTACIONES} value={kb} onSelect={setKb} placeholder="Presentación…" />
+            </div>
+            <p className="mt-2 text-xs text-muted">
+              Selección: <code className="rounded bg-surface-2 px-1">{kb || "—"}</code>
+            </p>
+          </div>
+        </div>
+      </Card>
+
+      {/* ComingSoon */}
+      <Card title="ComingSoon" subtitle="Placeholder para secciones aún no disponibles">
+        <div className="rounded-xl border border-dashed border-border p-4">
+          <ComingSoon title="Reportes avanzados" />
+        </div>
+      </Card>
+
+      {/* Onboarding (réplica visual — componentes data-driven) */}
+      <Card
+        title="Onboarding fiscal"
+        subtitle="OnboardingBanner + OnboardingChecklist — se alimentan del estado real del tenant (aquí, muestra de referencia)"
+      >
+        <div className="space-y-4">
+          {/* Banner */}
+          <div className="flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
+            <AlertTriangle size={18} className="shrink-0" />
+            <span className="flex-1">
+              <span className="font-medium">Completa la configuración de tu empresa</span> para emitir
+              facturas a tu nombre — falta: Serie de folios, Primer cliente con RFC válido.
+            </span>
+            <ArrowRight size={16} className="shrink-0" />
+          </div>
+
+          {/* Checklist */}
+          <div className="rounded-2xl border border-border bg-surface p-4">
+            <div className="mb-3 flex items-start justify-between gap-2">
+              <div>
+                <div className="text-sm font-semibold">Configuración para facturar</div>
+                <div className="text-xs text-muted">
+                  {ONBOARDING_PASOS.filter((p) => p.completo).length} de {ONBOARDING_PASOS.length} pasos completos
+                </div>
+              </div>
+              <Badge tone="warning">Configuración pendiente</Badge>
+            </div>
+            <ol className="space-y-3">
+              {ONBOARDING_PASOS.map((p, i) => (
+                <li key={p.titulo} className="flex items-start gap-3">
+                  {p.completo ? (
+                    <CheckCircle2 size={20} className="mt-0.5 shrink-0 text-emerald-600" />
+                  ) : (
+                    <Circle size={20} className="mt-0.5 shrink-0 text-muted" />
+                  )}
+                  <div>
+                    <div className="text-sm font-medium">
+                      <span className="text-muted">{i + 1}.</span> {p.titulo}
+                    </div>
+                    <div className="text-xs text-muted">{p.detalle}</div>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </div>
+        </div>
+      </Card>
+
+      {/* Plantillas y estructura (no renderizables en aislado) */}
+      <Card
+        title="Plantillas y estructura"
+        subtitle="Componentes de página / layout — no se renderizan aislados; se documentan aquí"
+      >
+        <ul className="space-y-2 text-sm">
+          <li>
+            <code className="rounded bg-surface-2 px-1">CrudPage</code>{" "}
+            <span className="text-muted">
+              — plantilla de página CRUD por configuración (campos, columnas, lookups, códigos auto). Alimenta
+              categorías, sucursales y proveedores; el formulario reutiliza Field/Input/Select/Switch de arriba.
+            </span>
+          </li>
+          <li>
+            <code className="rounded bg-surface-2 px-1">Sidebar</code> /{" "}
+            <code className="rounded bg-surface-2 px-1">Topbar</code>{" "}
+            <span className="text-muted">— estructura del shell de la app (navegación por permisos, tenant, usuario).</span>
+          </li>
+          <li>
+            <code className="rounded bg-surface-2 px-1">ProductoCombobox</code>{" "}
+            <span className="text-muted">— ver la sección “Search box” (buscador inteligente con backend).</span>
+          </li>
+        </ul>
       </Card>
 
       {/* Tabla */}
