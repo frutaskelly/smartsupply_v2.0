@@ -194,9 +194,9 @@ def factura_desde_remisiones(
     factura = Factura(
         tenant_id=ctx.tenant_id, serie=serie_codigo, folio=folio,
         cliente_id=cliente.id,
-        uso_cfdi=payload.uso_cfdi or cliente.uso_cfdi_default or "G03",
+        uso_cfdi=payload.uso_cfdi or cliente.uso_cfdi_default or "G01",
         forma_pago=payload.forma_pago or cliente.forma_pago_default or "99",
-        metodo_pago=payload.metodo_pago or cliente.metodo_pago_default or "PUE",
+        metodo_pago=payload.metodo_pago or cliente.metodo_pago_default or "PPD",
         lugar_expedicion=tenant.domicilio_fiscal_cp,
         notas=payload.notas, created_by=ctx.user_id, estado="BORRADOR",
     )
@@ -297,9 +297,9 @@ def factura_directa(
 
     factura = Factura(
         tenant_id=ctx.tenant_id, serie=serie_codigo, folio=folio, cliente_id=cliente.id,
-        uso_cfdi=payload.uso_cfdi or cliente.uso_cfdi_default or "G03",
+        uso_cfdi=payload.uso_cfdi or cliente.uso_cfdi_default or "G01",
         forma_pago=payload.forma_pago or cliente.forma_pago_default or "99",
-        metodo_pago=payload.metodo_pago or cliente.metodo_pago_default or "PUE",
+        metodo_pago=payload.metodo_pago or cliente.metodo_pago_default or "PPD",
         lugar_expedicion=tenant.domicilio_fiscal_cp,
         notas=payload.notas, created_by=ctx.user_id, estado="BORRADOR",
     )
