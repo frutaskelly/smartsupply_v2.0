@@ -63,6 +63,9 @@ export type CrudConfig<T> = {
   toPayload: (v: FormValues) => Record<string, unknown>;
   rowLabel: (row: T) => string;
   lookups?: Record<string, Lookup>;
+  /** Advertencia opcional al eliminar (impacto + alternativa). Si devuelve texto,
+   * se muestra en el diálogo de confirmación antes de borrar. */
+  deleteWarning?: (row: T) => Promise<string | null>;
 };
 
 const LIMIT = 20;
@@ -99,6 +102,13 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
 
   const [lookupOpts, setLookupOpts] = useState<Record<string, { value: string; label: string }[]>>({});
   const lookupsLoaded = useRef(false);
+
+  const [deleteWarn, setDeleteWarn] = useState<string | null>(null);
+  function askDelete(row: T) {
+    setDeleteWarn(null);
+    setToDelete(row);
+    config.deleteWarning?.(row).then(setDeleteWarn).catch(() => setDeleteWarn(null));
+  }
 
   const [form, setForm] = useState<FormValues | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -203,7 +213,7 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
           <button
             onClick={(e) => {
               e.stopPropagation();
-              setToDelete(row);
+              askDelete(row);
             }}
             aria-label="Eliminar"
             className="rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-danger"
@@ -334,9 +344,14 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
       <ConfirmDialog
         open={toDelete !== null}
         title={`Eliminar ${lower}`}
-        message={`¿Eliminar "${toDelete ? config.rowLabel(toDelete) : ""}"?`}
+        message={
+          deleteWarn
+            ? `⚠️ ${deleteWarn}`
+            : `¿Eliminar "${toDelete ? config.rowLabel(toDelete) : ""}"? Esta acción no se puede deshacer fácilmente.`
+        }
+        confirmLabel={deleteWarn ? "Eliminar de todas formas" : "Eliminar"}
         onConfirm={confirmDelete}
-        onClose={() => setToDelete(null)}
+        onClose={() => { setToDelete(null); setDeleteWarn(null); }}
         loading={saving}
       />
     </div>
