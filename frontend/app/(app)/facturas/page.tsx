@@ -12,6 +12,7 @@ import { DataTableSmart } from "@/components/ui/DataTableSmart";
 import { Checkbox, Field, Input, Select } from "@/components/ui/Field";
 import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { useOnboarding } from "@/components/OnboardingChecklist";
 import { Spinner } from "@/components/ui/Spinner";
 import { useToast } from "@/components/ui/Toast";
 import { ApiError, apiDownload, apiFetch } from "@/lib/api";
@@ -32,6 +33,8 @@ export default function FacturasPage() {
   const { me } = useAuth();
   const toast = useToast();
   const canWrite = can(me, WRITE);
+  const { status: onboardingStatus } = useOnboarding();
+  const ambiente = onboardingStatus?.ambiente ?? "sandbox";
 
   const clientesRes = useResource<Page<Cliente>>("/api/v1/clientes?limit=500");
   const clientes = clientesRes.data?.items ?? [];
@@ -218,7 +221,7 @@ export default function FacturasPage() {
     <div>
       <PageHeader
         title="Facturas"
-        subtitle="CFDI 4.0 — timbrado en modo sandbox (pruebas)"
+        subtitle={ambiente === "producción" ? "CFDI 4.0 — timbrado en producción" : "CFDI 4.0 — timbrado en modo sandbox (pruebas)"}
         actions={canWrite ? <Button onClick={openGen}><Plus size={16} /> Generar desde remisiones</Button> : undefined}
       />
 
@@ -276,8 +279,12 @@ export default function FacturasPage() {
         </div>
       </Modal>
 
-      <ConfirmDialog open={toTimbrar !== null} title="Timbrar factura (sandbox)"
-        message={`¿Timbrar ${toTimbrar?.serie}${toTimbrar?.folio}? Se enviará al PAC en modo sandbox (prueba).`}
+      <ConfirmDialog open={toTimbrar !== null} title={ambiente === "producción" ? "Timbrar factura" : "Timbrar factura (sandbox)"}
+        message={
+          ambiente === "producción"
+            ? `¿Timbrar ${toTimbrar?.serie}${toTimbrar?.folio}? Se enviará al PAC en producción — el CFDI será real ante el SAT.`
+            : `¿Timbrar ${toTimbrar?.serie}${toTimbrar?.folio}? Se enviará al PAC en modo sandbox (prueba).`
+        }
         onConfirm={timbrar} onClose={() => setToTimbrar(null)} loading={actBusy} />
       <Modal
         open={toCancel !== null}

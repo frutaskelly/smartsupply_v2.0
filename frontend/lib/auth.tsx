@@ -47,6 +47,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .then((res: { data: { session: Session | null } }) => {
         setSession(res.data.session);
         if (!res.data.session) setLoading(false);
+      })
+      .catch(() => {
+        // Refresh token inválido/expirado (sesión vieja en el navegador): tratar
+        // como "sin sesión" en vez de dejar la promesa rechazada sin capturar.
+        setSession(null);
+        setLoading(false);
       });
     const sub = supabase.auth.onAuthStateChange(
       (_event: AuthChangeEvent, next: Session | null) => {

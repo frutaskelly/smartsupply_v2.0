@@ -22,6 +22,7 @@ export type OnboardingStatus = {
   multiemisor: boolean;
   listo_para_facturar: boolean;
   pasos: OnboardingPaso[];
+  ambiente: "sandbox" | "producción";
 };
 
 /**

@@ -45,3 +45,5 @@ class EmpresaOnboardingOut(BaseModel):
     multiemisor: bool
     listo_para_facturar: bool
     pasos: list[OnboardingPaso] = Field(default_factory=list)
+    # Ambiente real del PAC ("sandbox" | "producción"), lo decide FACTURAMA_BASE_URL.
+    ambiente: str = "sandbox"

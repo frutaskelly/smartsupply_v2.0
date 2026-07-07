@@ -12,7 +12,7 @@ import { Field, Input, Select } from "@/components/ui/Field";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { useToast } from "@/components/ui/Toast";
 import { KeyboardCombobox, type ComboOption } from "@/components/KeyboardCombobox";
-import { OnboardingChecklist } from "@/components/OnboardingChecklist";
+import { OnboardingChecklist, useOnboarding } from "@/components/OnboardingChecklist";
 import { ApiError, apiFetch } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import { getSupabase } from "@/lib/supabaseClient";
@@ -130,6 +130,8 @@ export default function EmpresaPage() {
 
   // Recarga el checklist de onboarding tras guardar datos o subir CSD.
   const [onboardingKey, setOnboardingKey] = useState(0);
+  const { status: onboardingStatus } = useOnboarding(onboardingKey);
+  const ambiente = onboardingStatus?.ambiente ?? "sandbox";
 
   const [csds, setCsds] = useState<Csd[]>([]);
   const [cerFile, setCerFile] = useState<File | null>(null);
@@ -427,10 +429,16 @@ export default function EmpresaPage() {
 
       <Card title="Sellos digitales (CSD)" subtitle="Certificado de Sello Digital del SAT para timbrar">
         <div className="space-y-4">
-          <Alert tone="warning">
-            En modo sandbox se usan certificados de prueba; para timbrar con tu CSD
-            real se requiere la cuenta de Facturama en producción.
-          </Alert>
+          {ambiente === "producción" ? (
+            <Alert tone="success">
+              Ambiente de <b>producción</b>: los CFDI que timbres aquí son reales ante el SAT.
+            </Alert>
+          ) : (
+            <Alert tone="warning">
+              En modo sandbox se usan certificados de prueba; para timbrar con tu CSD
+              real se requiere la cuenta de Facturama en producción.
+            </Alert>
+          )}
 
           <p className="text-sm text-muted">
             Sube tu .cer y .key del SAT y la contraseña de la llave privada.

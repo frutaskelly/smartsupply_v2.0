@@ -132,4 +132,5 @@ def onboarding_status(
     status = compute_status(
         client, tenant, multiemisor=bool(getattr(settings, "FACTURAMA_MULTIEMISOR", False))
     )
+    status["ambiente"] = client.env_label
     return EmpresaOnboardingOut(**status)
