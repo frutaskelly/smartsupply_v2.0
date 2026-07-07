@@ -128,7 +128,10 @@ export function Select({
     const spaceAbove = r.top - 8;
     const desired = Math.min(options.length * 38 + 8, 288);
     const up = spaceBelow < Math.min(desired, 160) && spaceAbove > spaceBelow;
-    const maxHeight = Math.max(120, Math.floor(up ? spaceAbove : spaceBelow));
+    // Tope al alto deseado (≤288) además del espacio disponible: con muchas
+    // opciones (p. ej. régimen fiscal SAT) el panel scrollea en vez de crecer
+    // hasta salirse de la pantalla y dejar opciones inalcanzables.
+    const maxHeight = Math.max(120, Math.min(desired, Math.floor(up ? spaceAbove : spaceBelow)));
     const top = up ? r.top - gap - Math.min(desired, maxHeight) : r.bottom + gap;
     setRect({ left: r.left, top, width: r.width, maxHeight });
   }, [options.length]);

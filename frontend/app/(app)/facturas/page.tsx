@@ -1,17 +1,18 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Download, FileCode2, Plus, Stamp } from "lucide-react";
+import { Download, FileCode2, Plus, Stamp, X } from "lucide-react";
 
 import { Alert } from "@/components/ui/Alert";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { DataTable, type Column } from "@/components/ui/DataTable";
+import { DataTable, type Column, type RowAction } from "@/components/ui/DataTable";
 import { DataTableSmart } from "@/components/ui/DataTableSmart";
 import { Checkbox, Field, Input, Select } from "@/components/ui/Field";
 import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { Spinner } from "@/components/ui/Spinner";
 import { useToast } from "@/components/ui/Toast";
 import { ApiError, apiDownload, apiFetch } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
@@ -83,8 +84,9 @@ export default function FacturasPage() {
     }
   }
 
-  // ── acciones por factura ──
-  const [detalle, setDetalle] = useState<FacturaDetail | null>(null);
+  // ── detalle por fila (slide-down): se carga al expandir y se cachea ──
+  const [detalles, setDetalles] = useState<Record<string, FacturaDetail>>({});
+  const [detalleLoading, setDetalleLoading] = useState<Set<string>>(new Set());
   const [toTimbrar, setToTimbrar] = useState<Factura | null>(null);
   const [toCancel, setToCancel] = useState<Factura | null>(null);
   // Motivo de cancelación SAT (01–04). 01 requiere UUID de la factura que
@@ -95,15 +97,66 @@ export default function FacturasPage() {
   const [actBusy, setActBusy] = useState(false);
 
   async function verDetalle(f: Factura) {
-    try { setDetalle(await apiFetch<FacturaDetail>(`/api/v1/facturas/${f.id}`)); }
-    catch (e) { toast.error(e instanceof ApiError ? e.message : "No se pudo cargar"); }
+    if (detalles[f.id] || detalleLoading.has(f.id)) return;
+    setDetalleLoading((s) => new Set(s).add(f.id));
+    try {
+      const d = await apiFetch<FacturaDetail>(`/api/v1/facturas/${f.id}`);
+      setDetalles((m) => ({ ...m, [f.id]: d }));
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudo cargar");
+    } finally {
+      setDetalleLoading((s) => { const n = new Set(s); n.delete(f.id); return n; });
+    }
   }
+
+  // Olvida el detalle cacheado tras una acción que cambia el estado.
+  function invalidar(id: string) {
+    setDetalles((m) => { const n = { ...m }; delete n[id]; return n; });
+  }
+
+  function renderDetalle(f: Factura) {
+    const d = detalles[f.id];
+    if (!d) return <div className="flex justify-center py-6"><Spinner /></div>;
+    const ieps = d.lineas.reduce((s, l) => s + Number(l.ieps_importe || 0), 0);
+    return (
+      <div className="rounded-xl border border-border bg-background p-4">
+        <div className="mb-3 flex flex-wrap gap-4 text-sm">
+          <div><span className="text-muted">Cliente:</span> {cliName[d.cliente_id] ?? "—"}</div>
+          <div><span className="text-muted">Fecha:</span> {fmtDate(d.fecha)}</div>
+          <div><span className="text-muted">Estado:</span> <Badge tone={ESTADO_TONE[d.estado] ?? "muted"}>{d.estado}</Badge></div>
+          {d.uuid && <div><span className="text-muted">UUID:</span> <span className="font-mono text-xs">{d.uuid}</span></div>}
+          {d.fecha_timbrado && <div><span className="text-muted">Timbrada:</span> {fmtDateTime(d.fecha_timbrado)}</div>}
+        </div>
+        <DataTable
+          rows={d.lineas}
+          rowKey={(l) => l.numero_linea}
+          empty="Sin conceptos"
+          columns={[
+            { header: "Cant.", className: "text-right tabular-nums", cell: (l) => l.cantidad },
+            { header: "Descripción", cell: (l) => l.descripcion },
+            { header: "P/U", className: "text-right tabular-nums", cell: (l) => fmtMoney(l.valor_unitario) },
+            { header: "IEPS", className: "text-right tabular-nums", cell: (l) => fmtMoney(l.ieps_importe) },
+            { header: "IVA", className: "text-right tabular-nums", cell: (l) => fmtMoney(l.iva_importe) },
+            { header: "Importe", className: "text-right tabular-nums", cell: (l) => fmtMoney(l.importe) },
+          ]}
+        />
+        <div className="mt-3 flex flex-col items-end gap-1 text-sm">
+          <div className="flex gap-4"><span className="text-muted">Subtotal</span><span className="tabular-nums">{fmtMoney(d.subtotal)}</span></div>
+          {ieps > 0 && <div className="flex gap-4"><span className="text-muted">IEPS</span><span className="tabular-nums">{fmtMoney(ieps)}</span></div>}
+          <div className="flex gap-4"><span className="text-muted">IVA</span><span className="tabular-nums">{fmtMoney(d.iva_trasladado)}</span></div>
+          <div className="flex gap-4 text-base font-semibold"><span className="text-muted">Total</span><span className="tabular-nums">{fmtMoney(d.total)}</span></div>
+        </div>
+      </div>
+    );
+  }
+
   async function timbrar() {
     if (!toTimbrar) return;
     setActBusy(true);
     try {
       await apiFetch(`/api/v1/facturas/${toTimbrar.id}/timbrar`, { method: "POST" });
       toast.success("Factura timbrada (sandbox)");
+      invalidar(toTimbrar.id);
       setToTimbrar(null); reload();
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo timbrar");
@@ -128,6 +181,7 @@ export default function FacturasPage() {
         method: "POST", body: JSON.stringify(body),
       });
       toast.success("Factura cancelada (sandbox)");
+      invalidar(toCancel.id);
       setToCancel(null); reload();
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo cancelar");
@@ -143,26 +197,21 @@ export default function FacturasPage() {
     { header: "Cliente", cell: (f) => cliName[f.cliente_id] ?? "—" },
     { header: "Fecha", cell: (f) => fmtDate(f.fecha) },
     { header: "Estado", cell: (f) => <Badge tone={ESTADO_TONE[f.estado] ?? "muted"}>{f.estado}</Badge> },
-    { header: "Total", cell: (f) => fmtMoney(f.total), className: "text-right" },
-    {
-      header: "",
-      className: "text-right",
-      cell: (f) => (
-        <div className="flex justify-end gap-1">
-          <button onClick={() => verDetalle(f)} className="rounded-md px-2 py-1 text-xs text-muted hover:bg-surface-2 hover:text-foreground">Ver</button>
-          {canWrite && f.estado === "BORRADOR" && (
-            <button onClick={() => setToTimbrar(f)} className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-success hover:bg-surface-2"><Stamp size={13} /> Timbrar</button>
-          )}
-          {f.estado === "TIMBRADA" && (
-            <>
-              <button onClick={() => descargar(f, "pdf")} className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted hover:bg-surface-2"><Download size={13} /> PDF</button>
-              <button onClick={() => descargar(f, "xml")} className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted hover:bg-surface-2"><FileCode2 size={13} /> XML</button>
-              {canWrite && <button onClick={() => abrirCancelar(f)} className="rounded-md px-2 py-1 text-xs text-danger hover:bg-surface-2">Cancelar</button>}
-            </>
-          )}
-        </div>
-      ),
-    },
+    { header: "Subtotal", className: "text-right tabular-nums", cell: (f) => fmtMoney(f.subtotal) },
+    { header: "IVA", className: "text-right tabular-nums", cell: (f) => fmtMoney(f.iva_trasladado) },
+    { header: "Total", className: "text-right tabular-nums", cell: (f) => fmtMoney(f.total) },
+    { header: "Nota", cell: (f) => f.notas ?? "—" },
+  ];
+
+  const rowActions: RowAction<Factura>[] = [
+    { id: "timbrar", label: "Timbrar", icon: <Stamp size={15} />, tone: "success",
+      onClick: (f) => setToTimbrar(f), hidden: (f) => !(canWrite && f.estado === "BORRADOR") },
+    { id: "pdf", label: "Descargar PDF", icon: <Download size={15} />,
+      onClick: (f) => { void descargar(f, "pdf"); }, hidden: (f) => f.estado !== "TIMBRADA" },
+    { id: "xml", label: "Descargar XML", icon: <FileCode2 size={15} />,
+      onClick: (f) => { void descargar(f, "xml"); }, hidden: (f) => f.estado !== "TIMBRADA" },
+    { id: "cancelar", label: "Cancelar", icon: <X size={15} />, tone: "danger",
+      onClick: (f) => abrirCancelar(f), hidden: (f) => !(canWrite && f.estado === "TIMBRADA") },
   ];
 
   return (
@@ -173,7 +222,18 @@ export default function FacturasPage() {
         actions={canWrite ? <Button onClick={openGen}><Plus size={16} /> Generar desde remisiones</Button> : undefined}
       />
 
-      <DataTableSmart columns={columns} rows={rows} loading={loading} error={error} empty="Sin facturas" storageKey="facturas" />
+      <DataTableSmart
+        columns={columns}
+        rows={rows}
+        loading={loading}
+        error={error}
+        empty="Sin facturas"
+        rowKey={(f) => f.id}
+        actions={rowActions}
+        onRowExpand={verDetalle}
+        renderExpanded={renderDetalle}
+        storageKey="facturas"
+      />
 
       {/* generar */}
       <Modal open={genOpen} onClose={() => setGenOpen(false)} title="Generar factura desde remisiones" wide
@@ -214,38 +274,6 @@ export default function FacturasPage() {
             </div>
           )}
         </div>
-      </Modal>
-
-      {/* detalle */}
-      <Modal open={detalle !== null} onClose={() => setDetalle(null)} title={detalle ? `Factura ${detalle.serie}${detalle.folio}` : ""} wide
-        footer={<Button variant="secondary" onClick={() => setDetalle(null)}>Cerrar</Button>}>
-        {detalle && (
-          <div>
-            <div className="mb-3 flex flex-wrap gap-4 text-sm">
-              <div><span className="text-muted">Cliente:</span> {cliName[detalle.cliente_id] ?? "—"}</div>
-              <div><span className="text-muted">Estado:</span> <Badge tone={ESTADO_TONE[detalle.estado] ?? "muted"}>{detalle.estado}</Badge></div>
-              {detalle.uuid && <div><span className="text-muted">UUID:</span> <span className="font-mono text-xs">{detalle.uuid}</span></div>}
-              {detalle.fecha_timbrado && <div><span className="text-muted">Timbrada:</span> {fmtDateTime(detalle.fecha_timbrado)}</div>}
-            </div>
-            <DataTable
-              rows={detalle.lineas}
-              rowKey={(l) => l.numero_linea}
-              empty="Sin conceptos"
-              columns={[
-                { header: "Descripción", cell: (l) => l.descripcion },
-                { header: "Cant.", className: "text-right tabular-nums", cell: (l) => l.cantidad },
-                { header: "P. unit.", className: "text-right tabular-nums", cell: (l) => fmtMoney(l.valor_unitario) },
-                { header: "IVA", className: "text-right tabular-nums", cell: (l) => fmtMoney(l.iva_importe) },
-                { header: "Importe", className: "text-right tabular-nums", cell: (l) => fmtMoney(l.importe) },
-              ]}
-            />
-            <div className="mt-3 flex flex-col items-end gap-1 text-sm">
-              <div className="flex gap-4"><span className="text-muted">Subtotal</span><span className="tabular-nums">{fmtMoney(detalle.subtotal)}</span></div>
-              <div className="flex gap-4"><span className="text-muted">IVA</span><span className="tabular-nums">{fmtMoney(detalle.iva_trasladado)}</span></div>
-              <div className="flex gap-4 text-base font-semibold"><span>Total</span><span className="tabular-nums">{fmtMoney(detalle.total)}</span></div>
-            </div>
-          </div>
-        )}
       </Modal>
 
       <ConfirmDialog open={toTimbrar !== null} title="Timbrar factura (sandbox)"

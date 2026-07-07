@@ -169,6 +169,8 @@ def create_producto(
         esquema_impuesto_id=payload.esquema_impuesto_id,
     )
     data = payload.model_dump()
+    if data.get("nombre"):
+        data["nombre"] = data["nombre"].strip().upper()   # nombres siempre en mayúsculas
     if not (data.get("sku") or "").strip():
         data["sku"] = _next_sku(db)   # auto-generate when blank
     obj = Producto(**data, tenant_id=ctx.tenant_id)
@@ -196,6 +198,8 @@ def update_producto(
 ):
     obj = get_or_404(db, Producto, producto_id)
     data = payload.model_dump(exclude_unset=True)
+    if data.get("nombre"):
+        data["nombre"] = data["nombre"].strip().upper()   # nombres siempre en mayúsculas
     if "categoria_id" in data:
         ensure_fk(db, CategoriaProducto, data["categoria_id"], "categoria_id")
     if "esquema_impuesto_id" in data:
