@@ -344,9 +344,15 @@ export function DataTable<T>({
   // Objetos seleccionados: todas las filas (de `rows`) cuya clave esté marcada.
   const selectedRows = useMemo(
     () => rows.filter((row, i) => selectedKeys.has(keyOf(row, i))),
-    // keyOf depende de rowKey; rows y selectedKeys son las entradas reales.
+    // keyOf depende de rowKey, pero los callers casi siempre pasan un arrow
+    // inline (nueva referencia en cada render) — incluirlo aquí recalcula
+    // este memo en cada render y, junto con `onSelectionChange`, entra en un
+    // loop infinito de render (setState en el padre → nuevo `rows`/`rowKey` →
+    // este memo cambia → vuelve a notificar). El valor de `keyOf` es estable
+    // en la práctica (misma función de extracción de clave), así que no hace
+    // falta como dependencia.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [rows, selectedKeys, rowKey],
+    [rows, selectedKeys],
   );
   // Notifica al padre cuando cambia la selección (objetos de fila).
   const onSelectionChangeRef = useRef(onSelectionChange);
@@ -356,7 +362,8 @@ export function DataTable<T>({
   }, [selectedRows]);
 
   // Casilla de cabecera: marca/indeterminada según las filas FILTRADAS.
-  const filteredKeys = useMemo(() => filteredRows.map((row, i) => keyOf(row, i)), [filteredRows, rowKey]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- ver nota de `selectedRows` sobre `rowKey`
+  const filteredKeys = useMemo(() => filteredRows.map((row, i) => keyOf(row, i)), [filteredRows]);
   const selectedFilteredCount = useMemo(
     () => filteredKeys.reduce<number>((n, k) => (selectedKeys.has(k) ? n + 1 : n), 0),
     [filteredKeys, selectedKeys],
