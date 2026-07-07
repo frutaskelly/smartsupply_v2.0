@@ -37,10 +37,12 @@ services:
     image: smartsupplyv2-backend:prod
     container_name: smartsupplyv2_backend
     restart: unless-stopped
-    # Secrets vienen del .env (gitignored). Las claves de abajo lo sobreescriben
-    # para producción: DB en la nube, CORS de dominios reales, env=production.
+    # Secrets vienen del .env.prod (gitignored) — SEPARADO del .env de dev, que
+    # apunta a Facturama sandbox. .env.prod trae las credenciales/flags de
+    # producción (Facturama prod, ALLOW_PRODUCTION=true). Las claves de abajo lo
+    # sobreescriben: DB en la nube, CORS de dominios reales, env=production.
     env_file:
-      - .env
+      - .env.prod
     environment:
       ENVIRONMENT: production
       # Supabase connection pooler (Supavisor), session mode :5432 — IPv4. La
