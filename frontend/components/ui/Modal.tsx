@@ -34,19 +34,39 @@ export function Modal({
       onClick={onClose}
     >
       <div
-        className={`max-h-[90vh] w-full ${wide ? "max-w-3xl" : "max-w-lg"} overflow-auto rounded-2xl border border-border bg-background shadow-xl`}
+        // `resize` + `overflow-hidden` habilita el asa nativa del navegador en la
+        // esquina inferior derecha (líneas diagonales) para agrandar/achicar el
+        // modal hacia abajo y hacia la derecha. min-w/min-h evitan que se pueda
+        // arrastrar hasta desaparecer; max-w/max-h son el tamaño de arranque y
+        // también el tope al agrandar.
+        className={`relative flex max-h-[90vh] min-h-[16rem] w-full min-w-[22rem] ${
+          wide ? "max-w-3xl" : "max-w-lg"
+        } resize flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-xl`}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-border px-5 py-3">
+        <div className="flex shrink-0 items-center justify-between border-b border-border px-5 py-3">
           <h2 className="text-base font-semibold">{title}</h2>
           <button onClick={onClose} aria-label="Cerrar" className="rounded-lg p-1.5 text-muted hover:bg-surface-2">
             <X size={18} />
           </button>
         </div>
-        <div className="px-5 py-4">{children}</div>
+        <div className="flex-1 overflow-auto px-5 py-4">{children}</div>
         {footer && (
-          <div className="flex justify-end gap-2 border-t border-border px-5 py-3">{footer}</div>
+          <div className="flex shrink-0 justify-end gap-2 border-t border-border px-5 py-3">{footer}</div>
         )}
+        {/* Refuerzo visual del asa de resize nativa (líneas diagonales), por si el
+            navegador no la dibuja con suficiente contraste. No intercepta clics:
+            el arrastre real lo maneja el navegador vía `resize` en el contenedor. */}
+        <svg
+          aria-hidden="true"
+          className="pointer-events-none absolute bottom-0.5 right-0.5 text-muted/50"
+          width="10"
+          height="10"
+          viewBox="0 0 10 10"
+        >
+          <line x1="9" y1="1" x2="1" y2="9" stroke="currentColor" strokeWidth="1" />
+          <line x1="9" y1="5" x2="5" y2="9" stroke="currentColor" strokeWidth="1" />
+        </svg>
       </div>
     </div>
   );

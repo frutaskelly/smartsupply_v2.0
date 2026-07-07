@@ -78,6 +78,20 @@ const UNIDADES_SAT: SearchOption[] = [
   { value: "E48", label: "Unidad de servicio", hint: "E48" },
 ];
 
+// Catálogo largo de ejemplo (>8 opciones) para mostrar el filtro del Select.
+const CATALOGO_DEMO: { value: string; label: string }[] = [
+  { value: "601", label: "601 — General de Ley Personas Morales" },
+  { value: "603", label: "603 — Personas Morales con Fines no Lucrativos" },
+  { value: "605", label: "605 — Sueldos y Salarios e Ingresos Asimilados a Salarios" },
+  { value: "606", label: "606 — Arrendamiento" },
+  { value: "608", label: "608 — Demás ingresos" },
+  { value: "612", label: "612 — Personas Físicas con Actividades Empresariales y Profesionales" },
+  { value: "616", label: "616 — Sin obligaciones fiscales" },
+  { value: "621", label: "621 — Incorporación Fiscal" },
+  { value: "626", label: "626 — Régimen Simplificado de Confianza (RESICO)" },
+  { value: "630", label: "630 — Enajenación de acciones en bolsa de valores" },
+];
+
 export default function SistemaDisenoPage() {
   const toast = useToast();
   const [sw, setSw] = useState(true);
@@ -88,6 +102,7 @@ export default function SistemaDisenoPage() {
   const [prodSel, setProdSel] = useState<string | null>(null);
   const [unidadSat, setUnidadSat] = useState<string | null>("KGM");
   const [kb, setKb] = useState("KGM");
+  const [selLargo, setSelLargo] = useState("");
   const [sel, setSel] = useState("a");
 
   const cols: Column<Demo>[] = [
@@ -188,6 +203,18 @@ export default function SistemaDisenoPage() {
               <option value="d" disabled>Opción D (no disponible)</option>
             </Select>
           </Field>
+          <Field
+            label="Selector con filtro"
+            hint="con más de 8 opciones aparece una caja de filtro arriba (catálogos SAT: régimen fiscal, uso de CFDI, forma de pago…)"
+          >
+            <Select value={selLargo} onChange={(e) => setSelLargo(e.target.value)}>
+              {CATALOGO_DEMO.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
           <Field label="Número">
             <Input type="number" placeholder="0" />
           </Field>
@@ -242,7 +269,10 @@ export default function SistemaDisenoPage() {
       </Card>
 
       {/* Overlays */}
-      <Card title="Overlays" subtitle="Modal, ConfirmDialog">
+      <Card
+        title="Overlays"
+        subtitle="Modal, ConfirmDialog — el Modal se puede agrandar/achicar a mano desde su esquina inferior derecha (líneas diagonales), hacia abajo y hacia la derecha"
+      >
         <div className="flex flex-wrap gap-2">
           <Button variant="secondary" onClick={() => setModal(true)}>Abrir Modal</Button>
           <Button variant="danger" onClick={() => setConfirm(true)}>
@@ -460,6 +490,7 @@ export default function SistemaDisenoPage() {
       >
         <p className="text-sm text-muted">
           Cuerpo del modal. Se usa para formularios y confirmaciones detalladas. Cierra con Esc o el fondo.
+          Arrastra la esquina inferior derecha para agrandarlo o achicarlo.
         </p>
       </Modal>
 

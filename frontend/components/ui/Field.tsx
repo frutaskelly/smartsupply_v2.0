@@ -11,7 +11,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
-import { Check, ChevronDown } from "lucide-react";
+import { Check, ChevronDown, Search } from "lucide-react";
 import type {
   ChangeEvent,
   InputHTMLAttributes,
@@ -99,6 +99,14 @@ function nextEnabled(opts: Opt[], from: number, dir: 1 | -1): number {
   return from >= 0 && from < opts.length && !opts[from]?.disabled ? from : from;
 }
 
+/** Normaliza para filtrar sin acentos ni mayúsculas. */
+const norm = (s: string) => s.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+
+/** A partir de cuántas opciones el panel muestra una caja de filtro (catálogos
+ * SAT largos: régimen fiscal, uso de CFDI, forma de pago...). Listas cortas
+ * (p. ej. Activo/Suspendido/Baja) no la necesitan. */
+const FILTER_THRESHOLD = 8;
+
 export function Select({
   value,
   onChange,
@@ -109,15 +117,25 @@ export function Select({
   const options = useMemo(() => collectOptions(children), [children]);
   const current = value != null ? String(value) : "";
   const selected = options.find((o) => o.value === current) ?? null;
+  // Listas largas (catálogos SAT: régimen fiscal, uso de CFDI, forma de pago…)
+  // muestran una caja de filtro arriba del panel; listas cortas no la necesitan.
+  const filterable = options.length > FILTER_THRESHOLD;
 
   const [open, setOpen] = useState(false);
   const [hi, setHi] = useState(0);
+  const [q, setQ] = useState("");
   const [rect, setRect] = useState<{ left: number; top: number; width: number; maxHeight: number } | null>(null);
   const [mounted, setMounted] = useState(false);
   const triggerRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const filterRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => setMounted(true), []);
+
+  const filtered = useMemo(() => {
+    const ql = norm(q.trim());
+    return ql ? options.filter((o) => norm(o.label).includes(ql)) : options;
+  }, [options, q]);
 
   const place = useCallback(() => {
     const el = triggerRef.current;
@@ -126,22 +144,32 @@ export function Select({
     const gap = 4;
     const spaceBelow = window.innerHeight - r.bottom - 8;
     const spaceAbove = r.top - 8;
-    const desired = Math.min(options.length * 38 + 8, 288);
+    // El alto deseado se calcula sobre TODAS las opciones (no las filtradas) +
+    // la caja de filtro si aplica, para que el panel no cambie de tamaño en
+    // cada tecleo — solo su contenido interno crece/scrollea.
+    const desired = Math.min(options.length * 38 + 8, 380) + (filterable ? 44 : 0);
     const up = spaceBelow < Math.min(desired, 160) && spaceAbove > spaceBelow;
-    // Tope al alto deseado (≤288) además del espacio disponible: con muchas
-    // opciones (p. ej. régimen fiscal SAT) el panel scrollea en vez de crecer
-    // hasta salirse de la pantalla y dejar opciones inalcanzables.
+    // Tope al alto deseado además del espacio disponible: con muchas opciones
+    // (p. ej. régimen fiscal SAT) el panel scrollea en vez de crecer hasta
+    // salirse de la pantalla y dejar opciones inalcanzables.
     const maxHeight = Math.max(120, Math.min(desired, Math.floor(up ? spaceAbove : spaceBelow)));
     const top = up ? r.top - gap - Math.min(desired, maxHeight) : r.bottom + gap;
     setRect({ left: r.left, top, width: r.width, maxHeight });
-  }, [options.length]);
+  }, [options.length, filterable]);
 
   const openMenu = useCallback(() => {
     if (disabled) return;
     place();
+    setQ("");
     setHi(Math.max(options.findIndex((o) => o.value === current), 0));
     setOpen(true);
   }, [disabled, place, options, current]);
+
+  // Al abrir con filtro, foco directo a la caja de búsqueda (como los diálogos
+  // "Ayuda de catálogo" de referencia: escribir para filtrar de inmediato).
+  useEffect(() => {
+    if (open && filterable) filterRef.current?.focus();
+  }, [open, filterable]);
 
   // Cierre por clic fuera, Escape, scroll o resize (evita que el panel quede a la deriva).
   useEffect(() => {
@@ -164,6 +192,11 @@ export function Select({
     };
   }, [open]);
 
+  // `hi` corre sobre `filtered`, no `options`: al teclear en la caja de filtro
+  // la lista visible cambia, así que el índice resaltado también debe partir
+  // de cero para no apuntar a algo que ya no está en pantalla.
+  useEffect(() => setHi(0), [q]);
+
   function pick(o: Opt) {
     if (o.disabled) return;
     onChange?.({
@@ -172,6 +205,34 @@ export function Select({
     } as unknown as ChangeEvent<HTMLSelectElement>);
     setOpen(false);
     triggerRef.current?.focus();
+  }
+
+  /** Navegación por teclado del panel (flechas/Enter/Escape/Home/End), común al
+   * trigger y a la caja de filtro. `allowSpacePick` distingue ambos: en el
+   * trigger la barra espaciadora selecciona (como un <select> nativo); en la
+   * caja de filtro debe poder escribirse un espacio normalmente. */
+  function navigate(e: ReactKeyboardEvent, allowSpacePick: boolean) {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setHi((h) => nextEnabled(filtered, h, 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setHi((h) => nextEnabled(filtered, h, -1));
+    } else if (e.key === "Enter" || (allowSpacePick && e.key === " ")) {
+      e.preventDefault();
+      const o = filtered[hi];
+      if (o) pick(o);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      setOpen(false);
+      triggerRef.current?.focus();
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      setHi(nextEnabled(filtered, -1, 1));
+    } else if (e.key === "End") {
+      e.preventDefault();
+      setHi(nextEnabled(filtered, filtered.length, -1));
+    }
   }
 
   function onKeyDown(e: ReactKeyboardEvent<HTMLDivElement>) {
@@ -183,26 +244,13 @@ export function Select({
       }
       return;
     }
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      setHi((h) => nextEnabled(options, h, 1));
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      setHi((h) => nextEnabled(options, h, -1));
-    } else if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      const o = options[hi];
-      if (o) pick(o);
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      setOpen(false);
-    } else if (e.key === "Home") {
-      e.preventDefault();
-      setHi(nextEnabled(options, -1, 1));
-    } else if (e.key === "End") {
-      e.preventDefault();
-      setHi(nextEnabled(options, options.length, -1));
-    }
+    // Con caja de filtro, el foco vive ahí (ver `useEffect` de arriba) y es
+    // ella quien maneja la navegación; el trigger solo abre/cierra.
+    if (!filterable) navigate(e, true);
+  }
+
+  function onFilterKeyDown(e: ReactKeyboardEvent<HTMLInputElement>) {
+    navigate(e, false);
   }
 
   return (
@@ -239,7 +287,6 @@ export function Select({
         createPortal(
           <div
             ref={panelRef}
-            role="listbox"
             style={{
               position: "fixed",
               left: rect.left,
@@ -248,36 +295,58 @@ export function Select({
               maxHeight: rect.maxHeight,
               zIndex: 50,
             }}
-            className="overflow-auto rounded-lg border border-border bg-surface shadow-lg"
+            className="flex flex-col overflow-hidden rounded-lg border border-border bg-surface shadow-lg"
           >
-            {options.length === 0 ? (
-              <div className="px-3 py-2 text-sm text-muted">Sin opciones</div>
-            ) : (
-              options.map((o, i) => {
-                const isSel = o.value === current;
-                return (
-                  <button
-                    key={`${o.value}-${i}`}
-                    type="button"
-                    role="option"
-                    aria-selected={isSel}
-                    disabled={o.disabled}
-                    onClick={() => pick(o)}
-                    onMouseEnter={() => !o.disabled && setHi(i)}
-                    className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm ${
-                      o.disabled
-                        ? "cursor-not-allowed text-muted/60"
-                        : i === hi
-                          ? "bg-accent/10"
-                          : "hover:bg-surface-2"
-                    }`}
-                  >
-                    <span className="truncate">{o.label}</span>
-                    {isSel && <Check size={15} className="shrink-0 text-accent" />}
-                  </button>
-                );
-              })
+            {filterable && (
+              <div className="relative shrink-0 border-b border-border">
+                <Search
+                  size={14}
+                  className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted"
+                />
+                <input
+                  ref={filterRef}
+                  type="text"
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  onKeyDown={onFilterKeyDown}
+                  placeholder="Filtrar…"
+                  aria-label="Filtrar opciones"
+                  className="w-full bg-transparent py-2 pl-8 pr-3 text-sm outline-none"
+                />
+              </div>
             )}
+            <div role="listbox" className="overflow-auto">
+              {options.length === 0 ? (
+                <div className="px-3 py-2 text-sm text-muted">Sin opciones</div>
+              ) : filtered.length === 0 ? (
+                <div className="px-3 py-2 text-sm text-muted">Sin coincidencias.</div>
+              ) : (
+                filtered.map((o, i) => {
+                  const isSel = o.value === current;
+                  return (
+                    <button
+                      key={`${o.value}-${i}`}
+                      type="button"
+                      role="option"
+                      aria-selected={isSel}
+                      disabled={o.disabled}
+                      onClick={() => pick(o)}
+                      onMouseEnter={() => !o.disabled && setHi(i)}
+                      className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm ${
+                        o.disabled
+                          ? "cursor-not-allowed text-muted/60"
+                          : i === hi
+                            ? "bg-accent/10"
+                            : "hover:bg-surface-2"
+                      }`}
+                    >
+                      <span className="truncate">{o.label}</span>
+                      {isSel && <Check size={15} className="shrink-0 text-accent" />}
+                    </button>
+                  );
+                })
+              )}
+            </div>
           </div>,
           document.body
         )}

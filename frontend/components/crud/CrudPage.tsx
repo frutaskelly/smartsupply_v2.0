@@ -73,6 +73,10 @@ export type CrudConfig<T> = {
   /** Advertencia opcional al eliminar (impacto + alternativa). Si devuelve texto,
    * se muestra en el diálogo de confirmación antes de borrar. */
   deleteWarning?: (row: T) => Promise<string | null>;
+  /** Modal de alta/edición más ancho — para formularios con muchos campos o
+   * selects con etiquetas largas (p. ej. catálogos SAT) que se truncan. El
+   * modal también se puede agrandar a mano desde su esquina inferior derecha. */
+  wide?: boolean;
 };
 
 const LIMIT = 20;
@@ -277,6 +281,7 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
         open={form !== null}
         onClose={() => setForm(null)}
         title={editingId ? `Editar ${lower}` : `Nuevo ${lower}`}
+        wide={config.wide}
         footer={
           <>
             <Button variant="secondary" onClick={() => setForm(null)}>

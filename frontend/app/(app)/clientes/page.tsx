@@ -97,6 +97,7 @@ const config: CrudConfig<Cliente> = {
   basePath: "/api/v1/clientes",
   writePerm: "cliente:gestionar",
   searchable: false,
+  wide: true,
   columns: [
     { header: "Código", cell: (c) => c.codigo ?? "—" },
     { header: "Razón social", cell: (c) => <span className="font-medium">{c.legal_name}</span> },
