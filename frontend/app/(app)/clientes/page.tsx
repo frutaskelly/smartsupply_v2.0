@@ -113,19 +113,59 @@ const config: CrudConfig<Cliente> = {
       colSpan: 2,
       action: {
         label: "Verificar RFC",
-        // Facturama `/customers/status` solo devuelve FormatoCorrecto/Activo/Localizado:
-        // NO verifica que el Código Postal capturado esté ligado al RFC, ni la lista
-        // 69-B en sandbox (69-B sí aparecería en producción). Aquí solo validamos
-        // formato + activo + localizado en el SAT; el vínculo CP↔RFC no se comprueba.
-        run: async (rfc) => {
-          const r = await apiFetch<{ FormatoCorrecto: boolean; Activo: boolean; Localizado: boolean }>(
-            `/api/v1/clientes/validar-rfc?rfc=${encodeURIComponent(rfc)}`,
-          );
-          const ok = r.FormatoCorrecto && r.Activo && r.Localizado;
+        // Con Razón social + CP + Régimen ya capturados, valida el combo
+        // completo contra el SAT (POST /customers/validate): atrapa un CP o
+        // régimen mal capturado ANTES de que el timbrado real lo rechace.
+        // Si falta alguno de esos tres, hace el chequeo parcial de siempre
+        // (solo formato/activo/localizado del RFC) y avisa qué falta para
+        // completarlo.
+        watch: ["legal_name", "cp", "regimen_fiscal"],
+        run: async (rfc, form) => {
+          const nombre = String(form.legal_name ?? "").trim();
+          const cp = String(form.cp ?? "").trim();
+          const regimen = String(form.regimen_fiscal ?? "").trim();
+          const completo = Boolean(nombre && cp && regimen);
+
+          const qs = new URLSearchParams({ rfc });
+          if (completo) {
+            qs.set("nombre", nombre);
+            qs.set("cp", cp);
+            qs.set("regimen", regimen);
+          }
+          const r = await apiFetch<{
+            FormatoCorrecto?: boolean;
+            Activo?: boolean;
+            Localizado?: boolean;
+            ExistRfc?: boolean;
+            MatchName?: boolean;
+            MatchZipCode?: boolean;
+            MatchFiscalRegime?: boolean;
+          }>(`/api/v1/clientes/validar-rfc?${qs.toString()}`);
+
+          if (completo) {
+            const problemas = [
+              r.ExistRfc === false && "el RFC no existe ante el SAT",
+              r.MatchName === false && "la razón social no coincide",
+              r.MatchZipCode === false && "el código postal no coincide",
+              r.MatchFiscalRegime === false && "el régimen fiscal no coincide",
+            ].filter((x): x is string => Boolean(x));
+            return {
+              ok: problemas.length === 0,
+              message:
+                problemas.length === 0
+                  ? "RFC, razón social, CP y régimen coinciden con el SAT ✓"
+                  : `No coincide con el SAT: ${problemas.join(", ")}.`,
+            };
+          }
+
+          const ok = Boolean(r.FormatoCorrecto && r.Activo && r.Localizado);
+          const faltan = [!nombre && "razón social", !cp && "código postal", !regimen && "régimen fiscal"]
+            .filter((x): x is string => Boolean(x))
+            .join(", ");
           return {
             ok,
             message: ok
-              ? "RFC verificado: activo y localizado en el SAT ✓"
+              ? `RFC activo y localizado en el SAT ✓ — completa ${faltan} para validar también esos datos`
               : `RFC: formato ${r.FormatoCorrecto ? "ok" : "inválido"}, activo ${r.Activo ? "sí" : "no"}, localizado ${r.Localizado ? "sí" : "no"}`,
           };
         },

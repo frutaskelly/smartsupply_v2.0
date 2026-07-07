@@ -34,10 +34,17 @@ export type CrudField = {
   derive?: (form: FormValues) => string;
   /**
    * Botón de acción secundario junto al input. Al pulsarlo se ejecuta `run`
-   * con el valor actual del campo (como string); el mensaje devuelto se
-   * muestra con toast.success y los errores con toast.error.
+   * con el valor actual del campo y el formulario completo (por si la acción
+   * necesita otros campos, p. ej. validar RFC+Nombre+CP+Régimen juntos); el
+   * mensaje devuelto se muestra con toast.success y los errores con
+   * toast.error. `watch` son nombres de otros campos cuyo cambio también
+   * invalida el estado "Verificado" (por defecto solo se vigila este campo).
    */
-  action?: { label: string; run: (value: string) => Promise<{ ok: boolean; message: string }> };
+  action?: {
+    label: string;
+    run: (value: string, form: FormValues) => Promise<{ ok: boolean; message: string }>;
+    watch?: string[];
+  };
 };
 
 /** A select whose options come from another list endpoint. */
@@ -330,7 +337,7 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
                           disabled={isReadonly}
                           readOnly={isReadonly}
                         />
-                        {f.action && <FieldActionButton action={f.action} value={String(val ?? "")} />}
+                        {f.action && <FieldActionButton action={f.action} value={String(val ?? "")} form={form} />}
                       </div>
                     )}
                   </Field>
@@ -362,40 +369,48 @@ export function CrudPage<T extends { id: string }>({ config }: { config: CrudCon
 function FieldActionButton({
   action,
   value,
+  form,
 }: {
-  action: { label: string; run: (value: string) => Promise<{ ok: boolean; message: string }> };
+  action: {
+    label: string;
+    run: (value: string, form: FormValues) => Promise<{ ok: boolean; message: string }>;
+    watch?: string[];
+  };
   value: string;
+  form: FormValues;
 }) {
   const toast = useToast();
   const [busy, setBusy] = useState(false);
-  // Valor contra el que se verificó con éxito. Si el campo cambia después, se
-  // limpia el estado "Verificado" para no mostrar un resultado obsoleto.
-  const [verifiedValue, setVerifiedValue] = useState<string | null>(null);
+  // Huella (este campo + los de `watch`) contra la que se verificó con éxito.
+  // Si cualquiera cambia después, se limpia "Verificado" para no mostrar un
+  // resultado obsoleto (p. ej. el RFC quedó igual pero el CP cambió).
+  const fingerprint = [value, ...(action.watch ?? []).map((k) => String(form[k] ?? ""))].join(" ");
+  const [verifiedFingerprint, setVerifiedFingerprint] = useState<string | null>(null);
 
   useEffect(() => {
-    if (verifiedValue !== null && value !== verifiedValue) setVerifiedValue(null);
-  }, [value, verifiedValue]);
+    if (verifiedFingerprint !== null && fingerprint !== verifiedFingerprint) setVerifiedFingerprint(null);
+  }, [fingerprint, verifiedFingerprint]);
 
   async function run() {
     setBusy(true);
     try {
-      const { ok, message } = await action.run(value);
+      const { ok, message } = await action.run(value, form);
       if (ok) {
         toast.success(message);
-        setVerifiedValue(value);
+        setVerifiedFingerprint(fingerprint);
       } else {
         toast.error(message);
-        setVerifiedValue(null);
+        setVerifiedFingerprint(null);
       }
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "La acción falló");
-      setVerifiedValue(null);
+      setVerifiedFingerprint(null);
     } finally {
       setBusy(false);
     }
   }
 
-  const verified = verifiedValue !== null && verifiedValue === value;
+  const verified = verifiedFingerprint !== null && verifiedFingerprint === fingerprint;
 
   return (
     <Button

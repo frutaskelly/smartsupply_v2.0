@@ -139,6 +139,23 @@ class FacturamaClient:
                 raise FacturamaError(f"validar_rfc failed: {r.status_code} {r.text[:500]}")
             return r.json()
 
+    def validar_completo(self, rfc: str, name: str, zip_code: str, fiscal_regime: str) -> dict:
+        """Valida que Nombre, Código Postal y Régimen Fiscal coincidan con lo
+        que el SAT tiene registrado para ese RFC.
+
+        POST /customers/validate → {Rfc, ExistRfc, MatchName, MatchZipCode,
+        MatchFiscalRegime}. A diferencia de `validar_rfc` (que solo checa el
+        RFC en sí), esto atrapa un CP o régimen mal capturado ANTES de que el
+        timbrado lo rechace. Consume 1 folio de Facturama por llamada.
+        """
+        body = {"Rfc": rfc, "Name": name, "ZipCode": zip_code, "FiscalRegime": fiscal_regime}
+        with self._client() as c:
+            r = c.post("/customers/validate", json=body)
+            if r.status_code >= 400:
+                log.error("Facturama /customers/validate %s | RESPONSE=%s", r.status_code, r.text[:1000])
+                raise FacturamaError(f"validar_completo failed: {r.status_code} {r.text[:500]}")
+            return r.json()
+
     # ─── CSD (sellos digitales) — multi-emisor / api-lite ─────────────────
     def subir_csd(
         self, rfc: str, certificate_b64: str, private_key_b64: str, password: str

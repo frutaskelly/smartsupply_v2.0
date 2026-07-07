@@ -63,12 +63,24 @@ def list_clientes(
 @router.get("/validar-rfc")
 def validar_rfc(
     rfc: str = Query(..., min_length=10, max_length=15),
+    nombre: Optional[str] = Query(default=None, max_length=254),
+    cp: Optional[str] = Query(default=None, max_length=5),
+    regimen: Optional[str] = Query(default=None, max_length=4),
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
     """Valida un RFC contra el SAT vía Facturama.
 
-    Devuelve {Rfc, FormatoCorrecto, Activo, Localizado, ...}. Consume 1 folio de
-    Facturama por llamada (botón manual en el formulario de clientes).
+    Sin `nombre`/`cp`/`regimen`: solo formato + activo + localizado
+    (GET /customers/status) — {Rfc, FormatoCorrecto, Activo, Localizado}.
+
+    Con los tres presentes: valida ADEMÁS que la Razón social, el Código
+    Postal y el Régimen Fiscal coincidan con lo que el SAT tiene registrado
+    para ese RFC (POST /customers/validate) — {ExistRfc, MatchName,
+    MatchZipCode, MatchFiscalRegime}. Atrapa un dato mal capturado antes de
+    que el timbrado real lo rechace, en vez de descubrirlo hasta entonces.
+
+    Consume 1 folio de Facturama por llamada (botón manual en el formulario
+    de clientes).
     """
     rfc_u = rfc.strip().upper()
     # Filtro local: formato + dígito verificador. El sandbox de Facturama aprueba
@@ -82,6 +94,8 @@ def validar_rfc(
     if not client.configured:
         raise HTTPException(status_code=503, detail="Facturama no está configurado")
     try:
+        if nombre and cp and regimen:
+            return client.validar_completo(rfc_u, nombre.strip(), cp.strip(), regimen.strip())
         return client.validar_rfc(rfc_u)
     except FacturamaError as exc:
         raise HTTPException(status_code=502, detail=f"No se pudo validar el RFC: {exc}")
