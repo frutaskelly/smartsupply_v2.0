@@ -1,7 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { Download, FileCode2, Plus, Stamp, X } from "lucide-react";
+import { Download, Eye, FileCode2, Mail, Plus, Stamp, X } from "lucide-react";
 
 import { Alert } from "@/components/ui/Alert";
 import { Badge } from "@/components/ui/Badge";
@@ -9,13 +10,13 @@ import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { DataTable, type Column, type RowAction } from "@/components/ui/DataTable";
 import { DataTableSmart } from "@/components/ui/DataTableSmart";
-import { Checkbox, Field, Input, Select } from "@/components/ui/Field";
+import { Checkbox, Field, Input, Select, Textarea } from "@/components/ui/Field";
 import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { useOnboarding } from "@/components/OnboardingChecklist";
 import { Spinner } from "@/components/ui/Spinner";
 import { useToast } from "@/components/ui/Toast";
-import { ApiError, apiDownload, apiFetch } from "@/lib/api";
+import { ApiError, apiDownload, apiFetch, apiOpenInTab } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import { fmtDate, fmtDateTime, fmtMoney } from "@/lib/format";
 import { useResource, type Page } from "@/lib/hooks";
@@ -98,6 +99,12 @@ export default function FacturasPage() {
   const [cancelMotivo, setCancelMotivo] = useState("02");
   const [cancelSustitucion, setCancelSustitucion] = useState("");
   const [actBusy, setActBusy] = useState(false);
+
+  // ── enviar por correo ──
+  const [toEnviar, setToEnviar] = useState<Factura | null>(null);
+  const [enviarTo, setEnviarTo] = useState("");
+  const [enviarMensaje, setEnviarMensaje] = useState("");
+  const [enviarBusy, setEnviarBusy] = useState(false);
 
   async function verDetalle(f: Factura) {
     if (detalles[f.id] || detalleLoading.has(f.id)) return;
@@ -194,6 +201,38 @@ export default function FacturasPage() {
     try { await apiDownload(`/api/v1/facturas/${f.id}/${tipo}`, `${f.serie}${f.folio}.${tipo}`); }
     catch (e) { toast.error(e instanceof ApiError ? e.message : "No se pudo descargar"); }
   }
+  function previsualizar(f: Factura) {
+    // La pestaña se abre síncrona al click (antes del fetch autenticado) para
+    // que el navegador no la trate como pop-up bloqueado.
+    const win = window.open("", "_blank");
+    apiOpenInTab(`/api/v1/facturas/${f.id}/pdf`, win).catch((e) => {
+      toast.error(e instanceof ApiError ? e.message : "No se pudo abrir la factura");
+    });
+  }
+  function abrirEnviar(f: Factura) {
+    setEnviarTo(""); setEnviarMensaje(""); setToEnviar(f);
+  }
+  async function enviarCorreo() {
+    if (!toEnviar) return;
+    const destinatarios = enviarTo.split(/[,\s]+/).map((s) => s.trim()).filter(Boolean);
+    if (destinatarios.length === 0) {
+      toast.error("Indica al menos un destinatario");
+      return;
+    }
+    setEnviarBusy(true);
+    try {
+      await apiFetch(`/api/v1/facturas/${toEnviar.id}/enviar`, {
+        method: "POST",
+        body: JSON.stringify({ to: destinatarios, mensaje: enviarMensaje || undefined }),
+      });
+      toast.success(`Factura ${toEnviar.serie}${toEnviar.folio} enviada`);
+      setToEnviar(null);
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudo enviar la factura");
+    } finally {
+      setEnviarBusy(false);
+    }
+  }
 
   const columns: Column<Factura>[] = [
     { header: "Folio", cell: (f) => <span className="font-medium">{f.serie}{f.folio}</span> },
@@ -209,10 +248,14 @@ export default function FacturasPage() {
   const rowActions: RowAction<Factura>[] = [
     { id: "timbrar", label: "Timbrar", icon: <Stamp size={15} />, tone: "success",
       onClick: (f) => setToTimbrar(f), hidden: (f) => !(canWrite && f.estado === "BORRADOR") },
+    { id: "preview", label: "Ver factura", icon: <Eye size={15} />,
+      onClick: (f) => previsualizar(f), hidden: (f) => f.estado !== "TIMBRADA" },
     { id: "pdf", label: "Descargar PDF", icon: <Download size={15} />,
       onClick: (f) => { void descargar(f, "pdf"); }, hidden: (f) => f.estado !== "TIMBRADA" },
     { id: "xml", label: "Descargar XML", icon: <FileCode2 size={15} />,
       onClick: (f) => { void descargar(f, "xml"); }, hidden: (f) => f.estado !== "TIMBRADA" },
+    { id: "enviar", label: "Enviar por correo", icon: <Mail size={15} />,
+      onClick: (f) => abrirEnviar(f), hidden: (f) => !(canWrite && f.estado === "TIMBRADA") },
     { id: "cancelar", label: "Cancelar", icon: <X size={15} />, tone: "danger",
       onClick: (f) => abrirCancelar(f), hidden: (f) => !(canWrite && f.estado === "TIMBRADA") },
   ];
@@ -323,6 +366,42 @@ export default function FacturasPage() {
               (vuelven a estar disponibles para refacturar).
             </Alert>
           )}
+        </div>
+      </Modal>
+
+      <Modal
+        open={toEnviar !== null}
+        onClose={() => setToEnviar(null)}
+        title={`Enviar factura ${toEnviar?.serie ?? ""}${toEnviar?.folio ?? ""} por correo`}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setToEnviar(null)} disabled={enviarBusy}>Cerrar</Button>
+            <Button onClick={() => { void enviarCorreo(); }} disabled={enviarBusy}>
+              {enviarBusy ? "Enviando…" : "Enviar"}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <Field label="Destinatario(s)" required hint="Separa varios correos con coma o espacio">
+            <Input
+              placeholder="cliente@empresa.com"
+              value={enviarTo}
+              onChange={(e) => setEnviarTo(e.target.value)}
+            />
+          </Field>
+          <Field label="Mensaje (opcional)">
+            <Textarea
+              rows={3}
+              placeholder="Se incluirá arriba del cuerpo del correo"
+              value={enviarMensaje}
+              onChange={(e) => setEnviarMensaje(e.target.value)}
+            />
+          </Field>
+          <p className="text-xs text-muted">
+            Se adjuntan el XML y el PDF de la factura, usando la cuenta de correo configurada en{" "}
+            <Link href="/ajustes/correo" className="underline">Ajustes › Correo</Link>.
+          </p>
         </div>
       </Modal>
     </div>

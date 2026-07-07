@@ -38,8 +38,18 @@ def configured(tenant) -> bool:
     return bool(cfg.get("host") and cfg.get("username") and cfg.get("password"))
 
 
-def send_email(cfg: dict, to: list[str], subject: str, html: str) -> None:
+def send_email(
+    cfg: dict,
+    to: list[str],
+    subject: str,
+    html: str,
+    attachments: Optional[list[tuple[str, bytes, str]]] = None,
+) -> None:
     """Envía un correo HTML a `to` usando la config SMTP `cfg`.
+
+    `attachments` es una lista de (filename, content, mime_type), p. ej.
+    [("A1.pdf", pdf_bytes, "application/pdf")] — usado para adjuntar el
+    XML/PDF de una factura.
 
     Lanza una Exception con un mensaje claro si falla la conexión/autenticación.
     """
@@ -61,6 +71,9 @@ def send_email(cfg: dict, to: list[str], subject: str, html: str) -> None:
         "Este mensaje contiene contenido en HTML. Usa un cliente que lo soporte."
     )
     msg.add_alternative(html, subtype="html")
+    for filename, content, mime_type in attachments or []:
+        maintype, _, subtype = mime_type.partition("/")
+        msg.add_attachment(content, maintype=maintype, subtype=subtype or "octet-stream", filename=filename)
 
     try:
         if use_ssl:

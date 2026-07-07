@@ -77,3 +77,33 @@ export async function apiDownload(path: string, filename: string): Promise<void>
   a.remove();
   URL.revokeObjectURL(url);
 }
+
+/**
+ * Abre un archivo autenticado (p. ej. el PDF de una factura) para vista previa
+ * en una pestaña. La pestaña debe abrirse ANTES del fetch (síncrona con el
+ * click) para que el navegador no la bloquee como pop-up; aquí solo se le
+ * asigna la URL del blob una vez descargado.
+ */
+export async function apiOpenInTab(path: string, win: Window | null): Promise<void> {
+  const supabase = getSupabase();
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  const headers = new Headers();
+  if (session?.access_token) headers.set("Authorization", `Bearer ${session.access_token}`);
+
+  const res = await fetch(`${API_URL}${path}`, { headers });
+  if (!res.ok) {
+    win?.close();
+    let detail = res.statusText;
+    try {
+      detail = (await res.json()).detail ?? detail;
+    } catch {
+      /* binario o vacío */
+    }
+    throw new ApiError(res.status, detail);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  if (win) win.location.href = url;
+}

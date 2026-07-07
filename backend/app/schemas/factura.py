@@ -4,9 +4,14 @@ from datetime import datetime
 from decimal import Decimal
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 
 from .common import ORMModel
+
+
+class EnviarFacturaIn(BaseModel):
+    to: List[EmailStr] = Field(min_length=1, max_length=10)
+    mensaje: Optional[str] = Field(default=None, max_length=2000)
 
 
 class FacturaDesdeRemisionesIn(BaseModel):

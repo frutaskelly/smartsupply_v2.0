@@ -200,6 +200,21 @@ class FacturamaClient:
         except (FacturamaError, Exception):  # noqa: BLE001 — listado tolerante
             return []
 
+    # ─── Descarga de PDF/XML del CFDI ya timbrado ──────────────────────────
+    def download_pdf(self, cfdi_id: str) -> bytes:
+        with self._client() as c:
+            r = c.get(f"/cfdi/pdf/issued/{cfdi_id}")
+            if r.status_code >= 400:
+                raise FacturamaError(f"download_pdf failed: {r.status_code} {r.text[:200]}")
+            return base64.b64decode(r.json().get("Content", ""))
+
+    def download_xml(self, cfdi_id: str) -> bytes:
+        with self._client() as c:
+            r = c.get(f"/cfdi/xml/issued/{cfdi_id}")
+            if r.status_code >= 400:
+                raise FacturamaError(f"download_xml failed: {r.status_code} {r.text[:200]}")
+            return base64.b64decode(r.json().get("Content", ""))
+
 
 def csd_serial_number(certificate_b64: str) -> Optional[str]:
     """Número de serie legible del CSD (convención SAT: el entero ASN.1 del
@@ -234,20 +249,6 @@ def csd_public_fields(csds: list) -> list[dict]:
             }
         )
     return out
-
-    def download_pdf(self, cfdi_id: str) -> bytes:
-        with self._client() as c:
-            r = c.get(f"/cfdi/pdf/issued/{cfdi_id}")
-            if r.status_code >= 400:
-                raise FacturamaError(f"download_pdf failed: {r.status_code} {r.text[:200]}")
-            return base64.b64decode(r.json().get("Content", ""))
-
-    def download_xml(self, cfdi_id: str) -> bytes:
-        with self._client() as c:
-            r = c.get(f"/cfdi/xml/issued/{cfdi_id}")
-            if r.status_code >= 400:
-                raise FacturamaError(f"download_xml failed: {r.status_code} {r.text[:200]}")
-            return base64.b64decode(r.json().get("Content", ""))
 
 
 def startup_warnings(settings) -> list[str]:

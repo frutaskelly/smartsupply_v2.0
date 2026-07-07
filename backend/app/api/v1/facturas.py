@@ -34,11 +34,13 @@ from ...models import (
 from ...schemas.common import Page
 from ...schemas.factura import (
     CancelarFacturaIn,
+    EnviarFacturaIn,
     FacturaDesdeRemisionesIn,
     FacturaDetailOut,
     FacturaDirectaIn,
     FacturaOut,
 )
+from ...services import email as email_service
 from ...services.cfdi import build_payload
 from ...services.facturama import FacturamaClient, FacturamaError
 from ...services.fiscal import calcular_linea, totales
@@ -456,6 +458,17 @@ def cancelar_factura(
     return factura
 
 
+def _xml_de(factura: Factura) -> Optional[str]:
+    """XML cacheado en `factura.xml` o, si falta, obtenido en vivo del PAC."""
+    xml = factura.xml
+    if not xml and factura.facturama_id:
+        try:
+            xml = FacturamaClient.from_settings(settings).download_xml(factura.facturama_id).decode("utf-8", "ignore")
+        except FacturamaError:
+            xml = None
+    return xml
+
+
 @router.get("/{factura_id}/xml")
 def descargar_xml(
     factura_id: UUID,
@@ -463,12 +476,7 @@ def descargar_xml(
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
     factura = get_or_404(db, Factura, factura_id)
-    xml = factura.xml
-    if not xml and factura.facturama_id:
-        try:
-            xml = FacturamaClient.from_settings(settings).download_xml(factura.facturama_id).decode("utf-8", "ignore")
-        except FacturamaError:
-            xml = None
+    xml = _xml_de(factura)
     if not xml:
         raise HTTPException(status_code=404, detail="La factura no tiene XML (¿no está timbrada?)")
     return Response(content=xml, media_type="application/xml",
@@ -490,3 +498,52 @@ def descargar_pdf(
         raise HTTPException(status_code=502, detail=f"No se pudo descargar el PDF: {exc}")
     return Response(content=pdf, media_type="application/pdf",
                     headers={"Content-Disposition": f'inline; filename="{factura.serie}{factura.folio}.pdf"'})
+
+
+@router.post("/{factura_id}/enviar")
+def enviar_factura(
+    factura_id: UUID,
+    payload: EnviarFacturaIn,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """Envía el XML + PDF de una factura TIMBRADA por correo (SMTP del tenant,
+    configurado en Ajustes › Correo)."""
+    factura = get_or_404(db, Factura, factura_id)
+    if factura.estado != "TIMBRADA":
+        raise HTTPException(status_code=409, detail="Solo se puede enviar una factura timbrada")
+
+    tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
+    cfg = email_service.smtp_config(tenant)
+    if not email_service.configured(tenant):
+        raise HTTPException(
+            status_code=503,
+            detail="Configura una cuenta de correo en Ajustes › Correo antes de enviar facturas.",
+        )
+
+    xml = _xml_de(factura)
+    try:
+        pdf = FacturamaClient.from_settings(settings).download_pdf(factura.facturama_id)
+    except FacturamaError as exc:
+        raise HTTPException(status_code=502, detail=f"No se pudo obtener el PDF: {exc}")
+
+    cliente = db.query(Cliente).filter(Cliente.id == factura.cliente_id).one_or_none()
+    nombre_archivo = f"{factura.serie}{factura.folio}"
+    subject = f"Factura {nombre_archivo}" + (f" — {tenant.legal_name}" if tenant.legal_name else "")
+    mensaje_html = f"<p>{payload.mensaje}</p>" if payload.mensaje else ""
+    html = (
+        f"{mensaje_html}"
+        f"<p>Adjunto la factura <strong>{nombre_archivo}</strong>"
+        + (f" a nombre de {cliente.legal_name}" if cliente else "")
+        + f" por un total de <strong>${factura.total:,.2f} {factura.moneda}</strong>.</p>"
+        f"<p>UUID: <span style=\"font-family:monospace\">{factura.uuid or ''}</span></p>"
+    )
+    attachments: list[tuple[str, bytes, str]] = [(f"{nombre_archivo}.pdf", pdf, "application/pdf")]
+    if xml:
+        attachments.append((f"{nombre_archivo}.xml", xml.encode("utf-8"), "application/xml"))
+
+    try:
+        email_service.send_email(cfg, [str(e) for e in payload.to], subject, html, attachments=attachments)
+    except Exception as exc:  # noqa: BLE001 — superficie del error al cliente
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"ok": True}
