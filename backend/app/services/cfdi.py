@@ -9,11 +9,15 @@ del emisor cuyo CSD está cargado en Facturama).
 """
 from __future__ import annotations
 
+from datetime import datetime
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
 from ..core.config import settings
+
+_MX_TZ = ZoneInfo("America/Mexico_City")
 from ..models import Cliente, Factura, Producto, Tenant
 
 
@@ -124,6 +128,12 @@ def build_payload(db: Session, factura: Factura) -> dict:
     payload = {
         "NameId": "1",                       # CFDI ingresos
         "CfdiType": "I",
+        # Sin este campo, Facturama usaba su propio default y el timbrado por
+        # API (a diferencia de crear la factura a mano en su portal, que sí
+        # lo manda) quedaba rechazado con un error de "Nombre del emisor" que
+        # en realidad no era por el nombre. CFDI exige hora LOCAL del lugar
+        # de expedición (México), sin sufijo de zona horaria.
+        "Date": datetime.now(_MX_TZ).strftime("%Y-%m-%dT%H:%M:%S"),
         "PaymentForm": factura.forma_pago or "99",
         "PaymentMethod": factura.metodo_pago or "PUE",
         "Currency": factura.moneda or "MXN",
