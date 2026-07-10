@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import type { ClipboardEvent } from "react";
 import { Sparkles } from "lucide-react";
 
 import { apiFetch } from "@/lib/api";
@@ -28,11 +29,13 @@ export function ProductoCombobox({
   onSelect,
   placeholder = "Buscar producto…",
   autoFocus,
+  onPaste,
 }: {
   label?: string;
   onSelect: (p: ProductoPick | null, texto: string) => void;
   placeholder?: string;
   autoFocus?: boolean;
+  onPaste?: (e: ClipboardEvent<HTMLInputElement>) => void;
 }) {
   const [q, setQ] = useState(label ?? "");
   const [open, setOpen] = useState(false);
@@ -145,6 +148,7 @@ export function ProductoCombobox({
           onSelect(null, e.target.value); // limpia la selección mientras escribe
         }}
         onFocus={() => setOpen(true)}
+        onPaste={onPaste}
         onKeyDown={(e) => {
           if (e.key === "ArrowDown") { e.preventDefault(); setOpen(true); setHi((h) => Math.min(h + 1, Math.max(cands.length - 1, 0))); }
           else if (e.key === "ArrowUp") { e.preventDefault(); setHi((h) => Math.max(h - 1, 0)); }
