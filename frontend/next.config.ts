@@ -8,7 +8,7 @@ const nextConfig: NextConfig = {
   // v2: the build is a REAL gate. TypeScript errors fail the build (the
   // opposite of v1's `ignoreBuildErrors: true`). Next 16 removed `next lint`
   // and the `eslint` config key, so linting is configured separately later.
-  allowedDevOrigins: ["localhost:3012", "127.0.0.1", "192.168.1.74"],
+  allowedDevOrigins: ["localhost:3012", "127.0.0.1", "192.168.1.65"],
 };
 
 export default nextConfig;
