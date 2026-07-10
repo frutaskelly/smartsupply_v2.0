@@ -1,8 +1,13 @@
 # SmartSupply v2.0 — stack de PRODUCCIÓN.
 #
 # Imágenes autocontenidas (sin bind-mount del código) servidas a internet vía
-# el Cloudflare Tunnel compartido (cadena_tunnel). El backend usa la DB CLOUD
-# de Supabase (no el postgres local). Levantar con:
+# un Cloudflare Tunnel PROPIO (tunnel "smartsupplyv2", credenciales en
+# cloudflared-config/, gitignored). Antes dependía del túnel compartido
+# cadena_tunnel, cuya config vivía en una carpeta de OneDrive fuera de este
+# repo — cuando OneDrive no la rematerializaba tras un reinicio, el túnel
+# quedaba caído sin forma de auto-recuperarse. Ahora vive dentro del propio
+# stack, con restart:unless-stopped como todo lo demás aquí. El backend usa
+# la DB CLOUD de Supabase (no el postgres local). Levantar con:
 #
 #   docker compose -f docker-compose.prod.yml up -d --build
 #
@@ -92,6 +97,19 @@ services:
     image: smartsupplyv2-landing:prod
     container_name: smartsupplyv2_landing
     restart: unless-stopped
+    networks: [ssv2]
+
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: smartsupplyv2_tunnel
+    restart: unless-stopped
+    command: tunnel --config /etc/cloudflared/config.yml run
+    volumes:
+      - ./cloudflared-config:/etc/cloudflared:ro
+    depends_on:
+      - backend
+      - frontend
+      - landing
     networks: [ssv2]
 
 volumes:
