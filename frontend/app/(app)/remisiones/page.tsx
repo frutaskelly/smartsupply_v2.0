@@ -24,6 +24,12 @@ import type { Almacen, Cliente, MatchResult, Producto, Remision, RemisionDetail,
 
 const WRITE = "remision:gestionar";
 
+// Referencia estable para cuando `data` aún no llega: `?? []` crearía un
+// arreglo nuevo en cada render, lo que invalida el memo de `filteredRows` y
+// dispara un loop infinito de render en la tabla con selección (ver DataTable
+// selectedRows/onSelectionChange).
+const EMPTY_REMISIONES: Remision[] = [];
+
 const ESTADO_TONE: Record<string, "success" | "warning" | "muted" | "danger"> = {
   BORRADOR: "warning",
   CONFIRMADA: "success",
@@ -80,7 +86,7 @@ export default function RemisionesPage() {
 
   // lista
   const { data, loading, error, reload } = useResource<Page<Remision>>("/api/v1/remisiones?limit=50");
-  const rows = data?.items ?? [];
+  const rows = data?.items ?? EMPTY_REMISIONES;
 
   // ── filtros de lista (cliente-side) ──
   const [fDesde, setFDesde] = useState("");
@@ -269,14 +275,38 @@ export default function RemisionesPage() {
 
   // ── pegar como Excel ──
   const [pasteText, setPasteText] = useState("");
+
+  // Interpreta una fila pegada SIN asumir un orden fijo de columnas: la(s)
+  // celda(s) no numérica(s) son el producto (y, de haber una segunda, la
+  // presentación); de las celdas numéricas, la primera es cantidad y la
+  // segunda precio — sin importar en qué posición de la fila vengan ni
+  // espacios extra alrededor de cada valor.
+  function parseFilaPegada(cols: string[]) {
+    const celdas = cols.map((c) => c.replace(/\s+/g, " ").trim()).filter(Boolean);
+    const numericas: string[] = [];
+    const textos: string[] = [];
+    for (const c of celdas) {
+      const n = Number(c.replace(",", "."));
+      if (/^-?[\d.,]+$/.test(c) && !Number.isNaN(n)) numericas.push(String(n));
+      else textos.push(c);
+    }
+    return {
+      texto: textos[0] ?? "",
+      presentacion: textos[1] ?? "",
+      cantidad: numericas[0] && Number(numericas[0]) ? numericas[0] : "1",
+      precio: numericas[1] && Number(numericas[1]) ? numericas[1] : "",
+    };
+  }
+
   async function procesarPaste() {
     const filas = pasteText
       .split("\n")
       .map((r) => r.trim())
       .filter(Boolean)
-      .map((r) => r.split("\t").map((c) => c.trim()));
+      .map((r) => r.split("\t"));
     if (filas.length === 0) return;
-    const textos = filas.map((c) => c[0]);
+    const parsed = filas.map(parseFilaPegada);
+    const textos = parsed.map((p) => p.texto);
     let matches: MatchResult[] = [];
     try {
       matches = await apiFetch("/api/v1/productos/match", {
@@ -286,10 +316,8 @@ export default function RemisionesPage() {
     } catch {
       matches = [];
     }
-    const nuevas: LineaForm[] = filas.map((cols, i) => {
-      const texto = cols[0];
-      const cantidad = cols[1] && Number(cols[1].replace(",", ".")) ? cols[1].replace(",", ".") : "1";
-      const presIn = cols[2] || "";
+    const nuevas: LineaForm[] = parsed.map(({ texto, cantidad, precio, presentacion: presIn }, i) => {
+      const precioOver: Partial<LineaForm> = precio ? { precio, precioManual: true } : {};
       const top = matches[i]?.candidatos?.[0];
       const auto = top && (top.origen === "exacto" || top.origen === "alias" || top.score >= 85) ? top : null;
       if (auto) {
@@ -298,20 +326,90 @@ export default function RemisionesPage() {
         const presentacion = presIn && presKeys.includes(presIn) ? presIn : presKeys.includes(def) ? def : presKeys[0] ?? def;
         return nuevaLinea({
           texto, producto_id: auto.producto_id, label: auto.nombre,
-          presentaciones: presKeys, presentacion, cantidad,
+          presentaciones: presKeys, presentacion, cantidad, ...precioOver,
         });
       }
-      return nuevaLinea({ texto, cantidad, presentacion: presIn }); // sin resolver → el usuario confirma
+      return nuevaLinea({ texto, cantidad, presentacion: presIn, ...precioOver }); // sin resolver → el usuario confirma
     });
     setLineas((ls) => {
       const base = ls.filter((l) => l.producto_id || l.texto);
       return [...base, ...nuevas];
     });
-    // cotizar las que sí resolvieron
+    // cotizar las que sí resolvieron (respeta precioManual si venía precio pegado)
     nuevas.forEach((l) => l.producto_id && cotizar(l.key, l.producto_id, l.presentacion, l.cantidad));
     setPasteText("");
     setPasteOpen(false);
     toast.success(`${nuevas.length} líneas agregadas`);
+  }
+
+  // ── pegar una columna directo en la celda (como Excel): pega varias líneas
+  // sobre Cantidad o Producto y se reparten hacia abajo desde la fila actual,
+  // creando filas nuevas si el pegado trae más líneas de las que ya existen.
+  function pegarColumnaCantidad(key: string, text: string) {
+    const valores = text.split("\n").map((v) => v.split("\t")[0].trim()).filter(Boolean);
+    if (valores.length === 0) return;
+    const idx = lineas.findIndex((l) => l.key === key);
+    if (idx < 0) return;
+    setLineas((ls) => {
+      const next = [...ls];
+      valores.forEach((v, i) => {
+        const cantidad = v.replace(",", ".");
+        const pos = idx + i;
+        if (pos < next.length) {
+          const l = next[pos];
+          next[pos] = { ...l, cantidad, importe: Number(l.precio || 0) * Number(cantidad || 0) };
+        } else {
+          next.push(nuevaLinea({ cantidad }));
+        }
+      });
+      return next;
+    });
+    valores.forEach((v, i) => {
+      const l = lineas[idx + i];
+      if (l?.producto_id) cotizar(l.key, l.producto_id, l.presentacion, v.replace(",", "."));
+    });
+    toast.success(`${valores.length} cantidades pegadas`);
+  }
+
+  async function pegarColumnaProducto(key: string, text: string) {
+    const valores = text.split("\n").map((v) => v.split("\t")[0].trim()).filter(Boolean);
+    if (valores.length === 0) return;
+    const idx = lineas.findIndex((l) => l.key === key);
+    if (idx < 0) return;
+    let matches: MatchResult[] = [];
+    try {
+      matches = await apiFetch("/api/v1/productos/match", {
+        method: "POST",
+        body: JSON.stringify({ textos: valores, usar_ia: false, limit: 1 }),
+      });
+    } catch {
+      matches = [];
+    }
+    const paraCotizar: LineaForm[] = [];
+    setLineas((ls) => {
+      const next = [...ls];
+      valores.forEach((texto, i) => {
+        const pos = idx + i;
+        const base = pos < next.length ? next[pos] : nuevaLinea();
+        const top = matches[i]?.candidatos?.[0];
+        const auto = top && (top.origen === "exacto" || top.origen === "alias" || top.score >= 85) ? top : null;
+        let linea: LineaForm;
+        if (auto) {
+          const presKeys = Object.keys(auto.presentaciones ?? {});
+          const def = auto.presentacion_default ?? auto.unidad_base ?? presKeys[0] ?? "PIEZA";
+          const presentacion = presKeys.includes(def) ? def : presKeys[0] ?? def;
+          linea = { ...base, texto, producto_id: auto.producto_id, label: auto.nombre, presentaciones: presKeys, presentacion };
+          paraCotizar.push(linea);
+        } else {
+          linea = { ...base, texto, producto_id: "", label: "" };
+        }
+        if (pos < next.length) next[pos] = linea;
+        else next.push(linea);
+      });
+      return next;
+    });
+    paraCotizar.forEach((l) => cotizar(l.key, l.producto_id, l.presentacion, l.cantidad));
+    toast.success(`${valores.length} productos pegados`);
   }
 
   async function guardar(confirmar = false) {
@@ -794,6 +892,10 @@ export default function RemisionesPage() {
                     ref={(el) => { cellRefs.current[`${l.key}:cantidad`] = el; }}
                     onChange={(e) => { const v = e.target.value.replace(",", "."); setLinea(l.key, { cantidad: v, importe: Number(l.precio || 0) * Number(v || 0) }); cotizar(l.key, l.producto_id, l.presentacion, v); }}
                     onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); advanceLine(l.key, "cantidad"); } }}
+                    onPaste={(e) => {
+                      const text = e.clipboardData.getData("text");
+                      if (text.includes("\n")) { e.preventDefault(); pegarColumnaCantidad(l.key, text); }
+                    }}
                   />
                 </div>
                 <div className="col-span-12 sm:col-span-3">
@@ -801,6 +903,10 @@ export default function RemisionesPage() {
                     label={l.label || l.texto}
                     onSelect={(p, t) => onPickProducto(l.key, p, t)}
                     autoFocus={lineFocus?.key === l.key && lineFocus?.field === "producto"}
+                    onPaste={(e) => {
+                      const text = e.clipboardData.getData("text");
+                      if (text.includes("\n")) { e.preventDefault(); void pegarColumnaProducto(l.key, text); }
+                    }}
                   />
                 </div>
                 <div className="col-span-4 sm:col-span-2">
@@ -859,8 +965,8 @@ export default function RemisionesPage() {
 
         <Modal open={pasteOpen} onClose={() => setPasteOpen(false)} title="Pegar líneas desde Excel"
           footer={<><Button variant="secondary" onClick={() => setPasteOpen(false)}>Cancelar</Button><Button onClick={procesarPaste}>Procesar</Button></>}>
-          <p className="mb-2 text-sm text-muted">Pega columnas separadas por tabulador: <strong>producto, cantidad, presentación</strong> (una fila por línea). El sistema cruza cada producto automáticamente.</p>
-          <Textarea rows={8} value={pasteText} onChange={(e) => setPasteText(e.target.value)} placeholder={"zanahoria\t10\tKILO\njitomate\t5\tKILO"} />
+          <p className="mb-2 text-sm text-muted">Pega columnas separadas por tabulador (una fila por línea): <strong>producto</strong> y, en cualquier orden, <strong>cantidad</strong>, <strong>precio</strong> y/o <strong>presentación</strong> — el sistema detecta cuál es cuál. El producto se cruza automáticamente.</p>
+          <Textarea rows={8} value={pasteText} onChange={(e) => setPasteText(e.target.value)} placeholder={"zanahoria\t10\tKILO\njitomate\t5\t12.50"} />
         </Modal>
       </div>
     );
