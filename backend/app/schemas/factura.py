@@ -25,6 +25,9 @@ class FacturaDesdeRemisionesIn(BaseModel):
     notas: Optional[str] = None
     # True = suma las líneas del mismo producto/unidad en un solo concepto.
     agrupar_productos: bool = Field(default=False)
+    # Autoriza sobregiro al auto-confirmar remisiones en BORRADOR sin existencia
+    # suficiente (el inventario queda en negativo). Ignorado para CONFIRMADAS.
+    permitir_negativos: bool = Field(default=False)
 
 
 class CancelarFacturaIn(BaseModel):

@@ -215,7 +215,7 @@ export type Remision = {
   lista_precios_id?: string | null;
   fecha_remision: string;
   fecha_entrega?: string | null;
-  estado: "BORRADOR" | "CONFIRMADA" | "CANCELADA";
+  estado: "BORRADOR" | "CONFIRMADA" | "FACTURADA" | "CANCELADA";
   canal: string;
   factura_id?: string | null;
   subtotal: string;

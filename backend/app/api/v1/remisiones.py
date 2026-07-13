@@ -218,28 +218,26 @@ def update_remision(
     return rem
 
 
-@router.post("/{rem_id}/confirmar", response_model=RemisionDetailOut)
-def confirmar_remision(
-    rem_id: UUID,
-    payload: ConfirmarRemisionIn | None = Body(default=None),
-    db: Session = Depends(get_tenant_db),
-    ctx: AuthContext = Depends(require_permission(_WRITE)),
-):
-    rem = get_or_404(db, Remision, rem_id)
-    if rem.estado != "BORRADOR":
-        raise HTTPException(status_code=409, detail=f"Solo se confirma desde BORRADOR (actual: {rem.estado})")
+def reservar_stock_remision(
+    db: Session,
+    ctx: AuthContext,
+    rem: Remision,
+    *,
+    permitir_negativos: bool = False,
+    pesos: dict | None = None,
+) -> None:
+    """Reserva inventario para una remisión BORRADOR y la deja CONFIRMADA.
+
+    Cada línea trae presentación + cantidad; se reserva el equivalente en unidad
+    base (`disponible → reservada`), se estampa la cantidad reservada en la línea
+    (`cantidad_surtida`/`lote_id`) para que la cancelación libere exactamente lo
+    mismo, y se registra un movimiento SALIDA_REMISION por línea. Lanza 422 si
+    falta existencia y no se autorizó sobregiro. Compartida por el endpoint de
+    confirmar y por facturar-desde-remisiones (auto-confirma el borrador).
+    """
     if rem.almacen_id is None:
         raise HTTPException(status_code=422, detail="La remisión requiere un almacén para reservar inventario")
-
-    # Optional per-line real weights (catch-weight); override the estimate.
-    pesos = {p.linea_id: p.cantidad_base for p in (payload.pesos or [])} if payload else {}
-    # Sobregiro autorizado: confirma sin existencia suficiente (inventario negativo).
-    permitir_negativos = bool(payload.permitir_negativos) if payload else False
-
-    # Lines carry a presentation + a quantity in that presentation; reserve the
-    # equivalent in base units (the unit inventory is stored in). The reserved
-    # base amount is stamped on the line (cantidad_surtida) so cancel releases
-    # exactly what was held.
+    pesos = pesos or {}
     prod_ids = {ln.producto_id for ln in rem.lineas}
     productos = {p.id: p for p in db.query(Producto).filter(Producto.id.in_(prod_ids)).all()}
 
@@ -269,6 +267,25 @@ def confirmar_remision(
 
     rem.estado = "CONFIRMADA"
     rem.updated_by = ctx.user_id
+
+
+@router.post("/{rem_id}/confirmar", response_model=RemisionDetailOut)
+def confirmar_remision(
+    rem_id: UUID,
+    payload: ConfirmarRemisionIn | None = Body(default=None),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    rem = get_or_404(db, Remision, rem_id)
+    if rem.estado != "BORRADOR":
+        raise HTTPException(status_code=409, detail=f"Solo se confirma desde BORRADOR (actual: {rem.estado})")
+
+    # Optional per-line real weights (catch-weight); override the estimate.
+    pesos = {p.linea_id: p.cantidad_base for p in (payload.pesos or [])} if payload else {}
+    # Sobregiro autorizado: confirma sin existencia suficiente (inventario negativo).
+    permitir_negativos = bool(payload.permitir_negativos) if payload else False
+
+    reservar_stock_remision(db, ctx, rem, permitir_negativos=permitir_negativos, pesos=pesos)
     db.flush()
     db.refresh(rem)
     return rem

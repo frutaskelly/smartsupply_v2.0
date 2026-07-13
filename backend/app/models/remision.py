@@ -28,7 +28,7 @@ from sqlalchemy.orm import relationship
 from ..core.db import Base
 from .base import SoftDeleteMixin, TimestampMixin, tenant_fk, uuid_pk
 
-REMISION_ESTADO = Enum("BORRADOR", "CONFIRMADA", "CANCELADA", name="remision_estado")
+REMISION_ESTADO = Enum("BORRADOR", "CONFIRMADA", "FACTURADA", "CANCELADA", name="remision_estado")
 
 
 class Remision(Base, TimestampMixin, SoftDeleteMixin):

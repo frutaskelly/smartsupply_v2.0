@@ -30,9 +30,10 @@ const WRITE = "remision:gestionar";
 // selectedRows/onSelectionChange).
 const EMPTY_REMISIONES: Remision[] = [];
 
-const ESTADO_TONE: Record<string, "success" | "warning" | "muted" | "danger"> = {
+const ESTADO_TONE: Record<string, "success" | "warning" | "muted" | "danger" | "accent"> = {
   BORRADOR: "warning",
   CONFIRMADA: "success",
+  FACTURADA: "accent",
   CANCELADA: "danger",
 };
 
@@ -191,12 +192,18 @@ export default function RemisionesPage() {
     resolveFrom("sucursal", sucs);
   }
 
-  function openCreate() {
+  // Limpia el formulario dejándolo como recién abierto (sin salir de la pantalla).
+  // Lo usa "Borrar" y también openCreate al entrar.
+  function resetForm() {
     setClienteId(""); setSucursalId(""); setAlmacenId(""); setSerieOverride("");
     setSucursales([]); setNotas(""); setLineas([nuevaLinea()]);
     setFecha(today());            // fecha de hoy por defecto (el flujo la salta)
-    setMode("create");
     setStep("cliente");           // arranca con el cliente abierto
+  }
+
+  function openCreate() {
+    resetForm();
+    setMode("create");
   }
 
   function setLinea(key: string, patch: Partial<LineaForm>) {
@@ -656,7 +663,15 @@ export default function RemisionesPage() {
   // ── acciones en lote sobre las remisiones seleccionadas ──
   const [bulkBusy, setBulkBusy] = useState(false);
   const [facturarOpen, setFacturarOpen] = useState(false);
+  // Facturas que fallaron por existencia y esperan decisión de sobregiro.
+  const [facturarSobregiro, setFacturarSobregiro] = useState<
+    { grupos: string[][]; agrupar: boolean; creadas: number; omitidas: number; otras: number } | null
+  >(null);
   const [confirmarBulkOpen, setConfirmarBulkOpen] = useState(false);
+  // Remisiones del lote sin existencia que esperan decisión de sobregiro.
+  const [confirmarSobregiro, setConfirmarSobregiro] = useState<
+    { rems: Remision[]; ok: number; otras: number } | null
+  >(null);
   // Cancelación masiva con doble verificación: paso 1 → paso 2 → ejecuta.
   const [cancelBulkStep, setCancelBulkStep] = useState<0 | 1 | 2>(0);
 
@@ -665,7 +680,37 @@ export default function RemisionesPage() {
     await printRemisiones(selected);
   }
 
+  // Confirma un lote de remisiones. Devuelve cuántas se confirmaron, cuáles
+  // fallaron por falta de existencia (para ofrecer sobregiro) y cuántas por otro
+  // motivo.
+  async function enviarConfirmaciones(
+    rems: Remision[],
+    permitir_negativos: boolean,
+  ): Promise<{ ok: number; sinStock: Remision[]; otras: number }> {
+    const results = await Promise.allSettled(
+      rems.map((r) => post(`/api/v1/remisiones/${r.id}/confirmar`, { permitir_negativos })),
+    );
+    const sinStock: Remision[] = [];
+    let ok = 0;
+    let otras = 0;
+    results.forEach((res, i) => {
+      if (res.status === "fulfilled") ok += 1;
+      else if (res.reason instanceof ApiError && /existencia insuficiente/i.test(res.reason.message)) sinStock.push(rems[i]);
+      else otras += 1;
+    });
+    return { ok, sinStock, otras };
+  }
+
+  function reportarConfirmar(ok: number, fallidas: number) {
+    const partes = [`Confirmadas: ${ok}`];
+    if (fallidas) partes.push(`${fallidas} con error`);
+    toast[fallidas === 0 ? "success" : "error"](partes.join(" · "));
+    clearSelection();
+    reload();
+  }
+
   // Confirmar en lote las remisiones en BORRADOR seleccionadas (reserva stock).
+  // Si alguna no tiene existencia, se ofrece confirmarla con sobregiro.
   async function bulkConfirmar() {
     const elegibles = selected.filter((r) => r.estado === "BORRADOR");
     if (elegibles.length === 0) {
@@ -675,20 +720,38 @@ export default function RemisionesPage() {
     }
     setBulkBusy(true);
     try {
-      const results = await Promise.allSettled(
-        elegibles.map((r) => post(`/api/v1/remisiones/${r.id}/confirmar`, {})),
-      );
-      const ok = results.filter((x) => x.status === "fulfilled").length;
-      const fail = results.length - ok;
-      const partes = [`Confirmadas: ${ok}`];
-      if (fail) partes.push(`${fail} con error (p. ej. sin existencia)`);
-      toast[fail === 0 ? "success" : "error"](partes.join(" · "));
+      const { ok, sinStock, otras } = await enviarConfirmaciones(elegibles, false);
       setConfirmarBulkOpen(false);
-      clearSelection();
-      reload();
+      if (sinStock.length > 0) {
+        setConfirmarSobregiro({ rems: sinStock, ok, otras });
+        return;
+      }
+      reportarConfirmar(ok, otras);
     } finally {
       setBulkBusy(false);
     }
+  }
+
+  // Reintenta con sobregiro (inventario negativo) las remisiones del lote que
+  // fallaron por falta de existencia al confirmar.
+  async function aceptarConfirmarSobregiro() {
+    if (!confirmarSobregiro) return;
+    const { rems, ok, otras } = confirmarSobregiro;
+    setBulkBusy(true);
+    try {
+      const r = await enviarConfirmaciones(rems, true);
+      setConfirmarSobregiro(null);
+      reportarConfirmar(ok + r.ok, otras + r.otras);
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  function declinarConfirmarSobregiro() {
+    if (!confirmarSobregiro) return;
+    const { rems, ok, otras } = confirmarSobregiro;
+    setConfirmarSobregiro(null);
+    reportarConfirmar(ok, otras + rems.length);
   }
 
   // Cancelar en lote (libera inventario de las confirmadas). Doble verificación.
@@ -737,12 +800,45 @@ export default function RemisionesPage() {
   //  - "sumar":     una factura por cliente, sumando líneas del mismo producto en un concepto
   //  - "sin_sumar": una factura por cliente, una línea por cada partida de remisión
   //  - "separado":  una factura por remisión
-  // Solo elegibles: CONFIRMADA y sin factura_id. El resto se omite.
+  // Envía un lote de grupos a facturar. Devuelve cuántas se crearon, cuáles
+  // fallaron por falta de existencia (para ofrecer sobregiro) y cuántas por otro
+  // motivo. Facturar un BORRADOR lo auto-confirma en el backend (reserva stock).
+  async function enviarFacturas(
+    grupos: string[][],
+    agrupar_productos: boolean,
+    permitir_negativos: boolean,
+  ): Promise<{ creadas: number; sinStock: string[][]; otras: number }> {
+    const results = await Promise.allSettled(
+      grupos.map((remision_ids) =>
+        post("/api/v1/facturas/desde-remisiones", { remision_ids, agrupar_productos, permitir_negativos }),
+      ),
+    );
+    const sinStock: string[][] = [];
+    let creadas = 0;
+    let otras = 0;
+    results.forEach((res, i) => {
+      if (res.status === "fulfilled") creadas += 1;
+      else if (res.reason instanceof ApiError && /existencia insuficiente/i.test(res.reason.message)) sinStock.push(grupos[i]);
+      else otras += 1;
+    });
+    return { creadas, sinStock, otras };
+  }
+
+  function reportarFacturar(creadas: number, fallidas: number, omitidas: number) {
+    const partes = [`Facturas creadas: ${creadas}`];
+    if (fallidas) partes.push(`${fallidas} fallidas`);
+    if (omitidas) partes.push(`${omitidas} omitidas`);
+    toast[fallidas === 0 ? "success" : "error"](partes.join(" · "));
+    clearSelection();
+    reload();
+  }
+
+  // Solo elegibles: BORRADOR o CONFIRMADA sin factura previa. El resto se omite.
   async function bulkFacturar(modo: "sumar" | "sin_sumar" | "separado") {
-    const elegibles = selected.filter((r) => r.estado === "CONFIRMADA" && !r.factura_id);
+    const elegibles = selected.filter((r) => (r.estado === "BORRADOR" || r.estado === "CONFIRMADA") && !r.factura_id);
     const omitidas = selected.length - elegibles.length;
     if (elegibles.length === 0) {
-      toast.error(`Ninguna remisión elegible (se omitieron ${omitidas} no confirmadas o ya facturadas)`);
+      toast.error(`Ninguna remisión elegible (se omitieron ${omitidas} canceladas o ya facturadas)`);
       setFacturarOpen(false);
       return;
     }
@@ -762,23 +858,40 @@ export default function RemisionesPage() {
     const agrupar_productos = modo === "sumar";
     setBulkBusy(true);
     try {
-      const results = await Promise.allSettled(
-        grupos.map((remision_ids) =>
-          post("/api/v1/facturas/desde-remisiones", { remision_ids, agrupar_productos }),
-        ),
-      );
-      const creadas = results.filter((x) => x.status === "fulfilled").length;
-      const fallidas = results.length - creadas;
-      const partes = [`Facturas creadas: ${creadas}`];
-      if (fallidas) partes.push(`${fallidas} fallidas`);
-      if (omitidas) partes.push(`${omitidas} omitidas`);
-      toast[fallidas === 0 ? "success" : "error"](partes.join(" · "));
+      const { creadas, sinStock, otras } = await enviarFacturas(grupos, agrupar_productos, false);
       setFacturarOpen(false);
-      clearSelection();
-      reload();
+      if (sinStock.length > 0) {
+        // Hay borradores sin existencia: ofrece facturar con sobregiro.
+        setFacturarSobregiro({ grupos: sinStock, agrupar: agrupar_productos, creadas, omitidas, otras });
+        return;
+      }
+      reportarFacturar(creadas, otras, omitidas);
     } finally {
       setBulkBusy(false);
     }
+  }
+
+  // Reintenta con sobregiro (inventario negativo) las facturas que fallaron por
+  // falta de existencia al auto-confirmar un borrador.
+  async function confirmarFacturarSobregiro() {
+    if (!facturarSobregiro) return;
+    const { grupos, agrupar, creadas, omitidas, otras } = facturarSobregiro;
+    setBulkBusy(true);
+    try {
+      const r = await enviarFacturas(grupos, agrupar, true);
+      setFacturarSobregiro(null);
+      reportarFacturar(creadas + r.creadas, otras + r.otras, omitidas);
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  function declinarFacturarSobregiro() {
+    if (!facturarSobregiro) return;
+    const { grupos, creadas, omitidas, otras } = facturarSobregiro;
+    setFacturarSobregiro(null);
+    // Las que no se facturaron por falta de existencia cuentan como fallidas.
+    reportarFacturar(creadas, otras + grupos.length, omitidas);
   }
 
   const columns: Column<Remision>[] = [
@@ -797,7 +910,7 @@ export default function RemisionesPage() {
     { id: "confirmar", label: "Confirmar", icon: <Check size={15} />, tone: "success",
       onClick: (r) => setToConfirm(r), hidden: (r) => !(canWrite && r.estado === "BORRADOR") },
     { id: "cancelar", label: "Cancelar", icon: <X size={15} />, tone: "danger",
-      onClick: (r) => setToCancel(r), hidden: (r) => !(canWrite && r.estado !== "CANCELADA") },
+      onClick: (r) => setToCancel(r), hidden: (r) => !(canWrite && r.estado !== "CANCELADA" && r.estado !== "FACTURADA") },
     { id: "imprimir", label: "Imprimir", icon: <Printer size={15} />, onClick: (r) => { void imprimirRemision(r); } },
     { id: "enviar", label: "Enviar por correo", icon: <Mail size={15} />, onClick: enviarRemision,
       hidden: () => !canWrite },
@@ -955,7 +1068,7 @@ export default function RemisionesPage() {
                 <div className="flex gap-4 text-base font-semibold"><span className="text-muted">Total</span><span className="tabular-nums">{fmtMoney(totalPreview)}</span></div>
               </div>
               <div className="flex gap-2">
-                <Button variant="secondary" onClick={() => setMode("list")} disabled={saving}>Borrar</Button>
+                <Button variant="secondary" onClick={resetForm} disabled={saving}>Borrar</Button>
                 <Button variant="secondary" onClick={() => guardar(false)} disabled={saving}>{saving ? "Guardando…" : "Guardar"}</Button>
                 <Button onClick={() => guardar(true)} disabled={saving}>{saving ? "Guardando…" : "Confirmar"}</Button>
               </div>
@@ -975,12 +1088,12 @@ export default function RemisionesPage() {
   // Remisiones elegibles a facturar dentro de la selección y sus clientes distintos.
   // Una sola factura solo es válida con un único cliente: si hay varios, esas
   // opciones se deshabilitan en el popup (solo queda "Separado").
-  const facturarElegibles = selected.filter((r) => r.estado === "CONFIRMADA" && !r.factura_id);
+  const facturarElegibles = selected.filter((r) => (r.estado === "BORRADOR" || r.estado === "CONFIRMADA") && !r.factura_id);
   const clientesElegibles = [...new Set(facturarElegibles.map((r) => r.cliente_facturacion_id))];
   const multiCliente = clientesElegibles.length > 1;
   // Borradores (confirmables) y no-canceladas (cancelables) dentro de la selección.
   const borradoresSel = selected.filter((r) => r.estado === "BORRADOR");
-  const cancelablesSel = selected.filter((r) => r.estado !== "CANCELADA");
+  const cancelablesSel = selected.filter((r) => r.estado !== "CANCELADA" && r.estado !== "FACTURADA");
 
   return (
     <div>
@@ -1075,11 +1188,22 @@ export default function RemisionesPage() {
         onConfirm={confirmar} onClose={() => setToConfirm(null)} loading={saving} />
       <ConfirmDialog open={toCancel !== null} title="Cancelar remisión"
         message={`¿Cancelar ${toCancel?.folio_interno}? Se liberará el inventario reservado.`}
+        confirmLabel="Cancelada" confirmVariant="danger"
         onConfirm={cancelar} onClose={() => setToCancel(null)} loading={saving} />
+      <ConfirmDialog open={facturarSobregiro !== null} title="Existencia insuficiente"
+        message={`${facturarSobregiro?.grupos.length ?? 0} factura(s) no tienen existencia suficiente para el/los borrador(es). ¿Facturar de todas formas? El inventario quedará en negativo (sobregiro).`}
+        confirmLabel="Facturar con sobregiro" confirmVariant="danger"
+        onConfirm={confirmarFacturarSobregiro} onClose={declinarFacturarSobregiro} loading={bulkBusy} />
       <ConfirmDialog open={negStock !== null} title="Existencia insuficiente"
         message={`No hay existencia suficiente para confirmar ${negStock?.folio}. ¿Deseas remisionar de todas formas? El inventario quedará en negativo (sobregiro).`}
         confirmLabel="Remisionar sin existencias" confirmVariant="primary"
         onConfirm={confirmarNegativo} onClose={() => setNegStock(null)} loading={saving} />
+
+      {/* Sobregiro al confirmar en lote: las que no tienen existencia */}
+      <ConfirmDialog open={confirmarSobregiro !== null} title="Existencia insuficiente"
+        message={`${confirmarSobregiro?.rems.length ?? 0} remisión(es) no tienen existencia suficiente. ¿Confirmarlas de todas formas? El inventario quedará en negativo (sobregiro).`}
+        confirmLabel="Confirmar con sobregiro" confirmVariant="danger"
+        onConfirm={aceptarConfirmarSobregiro} onClose={declinarConfirmarSobregiro} loading={bulkBusy} />
 
       {/* Confirmar en lote (borradores → reserva inventario) */}
       <ConfirmDialog open={confirmarBulkOpen} title="Confirmar remisiones"
@@ -1132,7 +1256,8 @@ export default function RemisionesPage() {
         }
       >
         <p className="mb-3 text-sm text-muted">
-          Solo se facturan las remisiones <strong>confirmadas</strong> y sin factura previa; el resto se omite.
+          Se facturan las remisiones en <strong>borrador o confirmadas</strong> sin factura previa; el resto se omite.
+          Un borrador se confirma automáticamente (reserva inventario) al facturar.
           Elige cómo generar la(s) factura(s):
         </p>
         {multiCliente && (

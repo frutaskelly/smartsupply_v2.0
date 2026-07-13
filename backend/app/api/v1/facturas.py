@@ -48,6 +48,7 @@ from ...services.onboarding import compute_status
 from ...services.inventario import build_movimiento, presentacion_factor, presentacion_sat
 from ...services.series import consumir_folio, resolver_serie, siguiente_folio
 from ._helpers import get_or_404, paginate
+from .remisiones import reservar_stock_remision
 
 router = APIRouter(prefix="/facturas", tags=["facturas"])
 
@@ -93,7 +94,7 @@ def _release_remision_stock(db: Session, rems, ctx, factura) -> None:
     prod_ids = {ln.producto_id for r in rems for ln in r.lineas if ln.lote_id}
     productos = {p.id: p for p in db.query(Producto).filter(Producto.id.in_(prod_ids)).all()}
     for r in rems:
-        if r.estado != "CONFIRMADA":
+        if r.estado not in ("CONFIRMADA", "FACTURADA"):
             continue
         for ln in r.lineas:
             if ln.lote_id is None:
@@ -162,10 +163,19 @@ def factura_desde_remisiones(
     if len(clientes) != 1:
         raise HTTPException(status_code=422, detail="Todas las remisiones deben ser del mismo cliente")
     for r in rems:
-        if r.estado != "CONFIRMADA":
-            raise HTTPException(status_code=422, detail=f"La remisión {r.folio_interno} no está CONFIRMADA")
+        # El chequeo de "ya facturada" va primero: una remisión FACTURADA siempre
+        # tiene factura_id, y ese caso debe responder 409 (no 422 por el estado).
         if r.factura_id is not None:
             raise HTTPException(status_code=409, detail=f"La remisión {r.folio_interno} ya está facturada")
+        if r.estado not in ("BORRADOR", "CONFIRMADA"):
+            raise HTTPException(status_code=422, detail=f"La remisión {r.folio_interno} no se puede facturar (estado {r.estado})")
+
+    # Facturar auto-confirma las remisiones en BORRADOR (reserva inventario y
+    # registra la salida) para que la factura salga contra existencias reales,
+    # igual que confirmar manualmente. Las CONFIRMADAS ya reservaron su stock.
+    for r in rems:
+        if r.estado == "BORRADOR":
+            reservar_stock_remision(db, ctx, r, permitir_negativos=payload.permitir_negativos)
 
     cliente = get_or_404(db, Cliente, clientes.pop())
     tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
@@ -220,6 +230,7 @@ def factura_desde_remisiones(
             specs.append({"producto_id": ln.producto_id, "prod": prod, "esq": esq,
                           "cantidad": cantidad, "clave_unidad": clave_unidad, "importe": importe})
         r.factura_id = factura.id
+        r.estado = "FACTURADA"
 
     # agrupar_productos: suma cantidad/importe de líneas con mismo producto+unidad.
     if payload.agrupar_productos:
@@ -444,14 +455,16 @@ def cancelar_factura(
         # refacturan, porque no hubo operación).
         _release_remision_stock(db, rems, ctx, factura)
         for r in rems:
-            if r.estado == "CONFIRMADA":
+            if r.estado in ("CONFIRMADA", "FACTURADA"):
                 r.estado = "CANCELADA"
             r.factura_id = None
     else:
         # 01/02/04 (errores/sustitución/global): la operación sí ocurre y se
         # reexpide → se liberan las remisiones para refacturar; el inventario
-        # permanece reservado (la mercancía sigue saliendo).
+        # permanece reservado (la mercancía sigue saliendo). Vuelven a CONFIRMADA.
         for r in rems:
+            if r.estado == "FACTURADA":
+                r.estado = "CONFIRMADA"
             r.factura_id = None
     db.flush()
     db.refresh(factura)

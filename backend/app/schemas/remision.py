@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from .common import ORMModel
 
-RemisionEstado = Literal["BORRADOR", "CONFIRMADA", "CANCELADA"]
+RemisionEstado = Literal["BORRADOR", "CONFIRMADA", "FACTURADA", "CANCELADA"]
 Canal = Literal["MANUAL", "WEB", "API"]
 
 

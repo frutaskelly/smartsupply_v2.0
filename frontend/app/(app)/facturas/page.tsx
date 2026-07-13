@@ -57,8 +57,8 @@ export default function FacturasPage() {
 
   useEffect(() => {
     if (!genCliente) { setRemisiones([]); setSel({}); return; }
-    apiFetch<Page<Remision>>(`/api/v1/remisiones?estado=CONFIRMADA&cliente_id=${genCliente}&limit=200`)
-      .then((r) => setRemisiones(r.items.filter((x) => !x.factura_id)))
+    apiFetch<Page<Remision>>(`/api/v1/remisiones?cliente_id=${genCliente}&limit=200`)
+      .then((r) => setRemisiones(r.items.filter((x) => !x.factura_id && (x.estado === "BORRADOR" || x.estado === "CONFIRMADA"))))
       .catch(() => setRemisiones([]));
     setSel({});
   }, [genCliente]);
@@ -300,7 +300,7 @@ export default function FacturasPage() {
           </Field>
         </div>
         <div className="mt-4">
-          <div className="mb-2 text-sm font-medium">Remisiones confirmadas sin facturar</div>
+          <div className="mb-2 text-sm font-medium">Remisiones sin facturar (borrador o confirmadas)</div>
           {genCliente && remisiones.length === 0 && <div className="text-sm text-muted">Este cliente no tiene remisiones confirmadas pendientes.</div>}
           <div className="max-h-64 space-y-1 overflow-auto">
             {remisiones.map((r) => (
@@ -328,6 +328,7 @@ export default function FacturasPage() {
             ? `¿Timbrar ${toTimbrar?.serie}${toTimbrar?.folio}? Se enviará al PAC en producción — el CFDI será real ante el SAT.`
             : `¿Timbrar ${toTimbrar?.serie}${toTimbrar?.folio}? Se enviará al PAC en modo sandbox (prueba).`
         }
+        confirmLabel="Facturar" confirmVariant="success"
         onConfirm={timbrar} onClose={() => setToTimbrar(null)} loading={actBusy} />
       <Modal
         open={toCancel !== null}

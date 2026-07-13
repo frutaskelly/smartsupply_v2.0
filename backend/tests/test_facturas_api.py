@@ -133,6 +133,18 @@ def _remision_confirmada(client, h, env, qty="10", precio="20"):
     return rem["id"]
 
 
+def _remision_borrador(client, h, env, qty="10", precio="20", con_stock=True):
+    """Remisión en BORRADOR (sin confirmar). Con `con_stock` siembra existencia."""
+    if con_stock:
+        client.post("/api/v1/inventario/movimientos", headers=h, json={
+            "tipo": "ENTRADA_COMPRA", "producto_id": env["prod_id"], "almacen_id": env["alm_id"],
+            "cantidad": "1000", "costo_unitario": "5"})
+    rem = client.post("/api/v1/remisiones", headers=h, json={
+        "cliente_facturacion_id": env["cli_id"], "almacen_id": env["alm_id"],
+        "lineas": [{"producto_id": env["prod_id"], "cantidad_solicitada": qty, "precio_unitario": precio}]}).json()
+    return rem["id"]
+
+
 def test_factura_desde_remision(client, env, auth_as):
     auth_as(env["admin"]); h = _hdr(env["admin"])
     rem_id = _remision_confirmada(client, h, env, qty="10", precio="20")  # 200 + IVA 16%
@@ -150,6 +162,41 @@ def test_factura_desde_remision(client, env, auth_as):
     # re-facturar la misma remisión → 409 (ya facturada)
     assert client.post("/api/v1/facturas/desde-remisiones", headers=h,
                        json={"remision_ids": [rem_id]}).status_code == 409
+
+
+def test_factura_desde_borrador_autoconfirma(client, env, auth_as):
+    """Facturar un BORRADOR lo auto-confirma (reserva inventario) y lo deja FACTURADA."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    rem_id = _remision_borrador(client, h, env, qty="10", precio="20")
+    assert client.get(f"/api/v1/remisiones/{rem_id}", headers=h).json()["estado"] == "BORRADOR"
+
+    f = client.post("/api/v1/facturas/desde-remisiones", headers=h, json={"remision_ids": [rem_id]})
+    assert f.status_code == 201, f.text
+    assert f.json()["estado"] == "BORRADOR"          # la factura nace como borrador
+    assert float(f.json()["total"]) == 232.0
+
+    # la remisión pasó a FACTURADA
+    assert client.get(f"/api/v1/remisiones/{rem_id}", headers=h).json()["estado"] == "FACTURADA"
+
+    # re-facturar → 409 (ya facturada), no 422 por el estado
+    assert client.post("/api/v1/facturas/desde-remisiones", headers=h,
+                       json={"remision_ids": [rem_id]}).status_code == 409
+
+
+def test_factura_desde_borrador_sin_stock_sobregiro(client, env, auth_as):
+    """Sin existencia el auto-confirm falla 422; con permitir_negativos pasa (sobregiro)."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    rem_id = _remision_borrador(client, h, env, qty="10", precio="20", con_stock=False)
+
+    r = client.post("/api/v1/facturas/desde-remisiones", headers=h, json={"remision_ids": [rem_id]})
+    assert r.status_code == 422, r.text
+    # tras el 422 la remisión sigue en BORRADOR (rollback)
+    assert client.get(f"/api/v1/remisiones/{rem_id}", headers=h).json()["estado"] == "BORRADOR"
+
+    ok = client.post("/api/v1/facturas/desde-remisiones", headers=h,
+                     json={"remision_ids": [rem_id], "permitir_negativos": True})
+    assert ok.status_code == 201, ok.text
+    assert client.get(f"/api/v1/remisiones/{rem_id}", headers=h).json()["estado"] == "FACTURADA"
 
 
 def test_cruce_dos_remisiones(client, env, auth_as):
