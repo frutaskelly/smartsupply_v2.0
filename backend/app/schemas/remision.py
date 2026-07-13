@@ -73,6 +73,10 @@ class RemisionOut(ORMModel):
     estado: str
     canal: str
     factura_id: Optional[uuid.UUID] = None
+    # Folio (serie+folio) y estado de la ÚLTIMA factura de la remisión, para la
+    # columna "Factura" de la lista (incluye facturas canceladas).
+    factura_folio: Optional[str] = None
+    factura_estado: Optional[str] = None
     subtotal: Decimal
     descuento: Decimal
     iva: Decimal

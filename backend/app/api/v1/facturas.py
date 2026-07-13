@@ -42,6 +42,7 @@ from ...schemas.factura import (
 )
 from ...services import email as email_service
 from ...services.cfdi import build_payload
+from ...services.factura_pdf import build_factura_pdf
 from ...services.facturama import FacturamaClient, FacturamaError
 from ...services.fiscal import calcular_linea, totales
 from ...services.onboarding import compute_status
@@ -162,10 +163,18 @@ def factura_desde_remisiones(
     clientes = {r.cliente_facturacion_id for r in rems}
     if len(clientes) != 1:
         raise HTTPException(status_code=422, detail="Todas las remisiones deben ser del mismo cliente")
+    # Una remisión queda "libre" para facturar si no tiene factura o si su última
+    # factura fue CANCELADA (refacturación). factura_id ya no se anula al cancelar.
+    linked_ids = {r.factura_id for r in rems if r.factura_id}
+    linked = (
+        {f.id: f for f in db.query(Factura).filter(Factura.id.in_(linked_ids)).all()}
+        if linked_ids else {}
+    )
     for r in rems:
-        # El chequeo de "ya facturada" va primero: una remisión FACTURADA siempre
-        # tiene factura_id, y ese caso debe responder 409 (no 422 por el estado).
-        if r.factura_id is not None:
+        # El chequeo de "ya facturada" va primero, pero solo si su factura NO está
+        # cancelada (una cancelada se puede refacturar).
+        lf = linked.get(r.factura_id) if r.factura_id else None
+        if lf is not None and lf.estado != "CANCELADA":
             raise HTTPException(status_code=409, detail=f"La remisión {r.folio_interno} ya está facturada")
         if r.estado not in ("BORRADOR", "CONFIRMADA"):
             raise HTTPException(status_code=422, detail=f"La remisión {r.folio_interno} no se puede facturar (estado {r.estado})")
@@ -457,15 +466,17 @@ def cancelar_factura(
         for r in rems:
             if r.estado in ("CONFIRMADA", "FACTURADA"):
                 r.estado = "CANCELADA"
-            r.factura_id = None
+            # factura_id se conserva apuntando a la factura cancelada (para la
+            # columna "Factura" de la lista); la remisión CANCELADA no se refactura.
     else:
         # 01/02/04 (errores/sustitución/global): la operación sí ocurre y se
         # reexpide → se liberan las remisiones para refacturar; el inventario
         # permanece reservado (la mercancía sigue saliendo). Vuelven a CONFIRMADA.
+        # factura_id se conserva (factura cancelada); la refacturabilidad se
+        # deriva de que esa factura esté CANCELADA (ver factura_desde_remisiones).
         for r in rems:
             if r.estado == "FACTURADA":
                 r.estado = "CONFIRMADA"
-            r.factura_id = None
     db.flush()
     db.refresh(factura)
     return factura
@@ -503,12 +514,9 @@ def descargar_pdf(
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
     factura = get_or_404(db, Factura, factura_id)
-    if not factura.facturama_id:
-        raise HTTPException(status_code=404, detail="La factura no está timbrada")
-    try:
-        pdf = FacturamaClient.from_settings(settings).download_pdf(factura.facturama_id)
-    except FacturamaError as exc:
-        raise HTTPException(status_code=502, detail=f"No se pudo descargar el PDF: {exc}")
+    tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
+    cliente = db.query(Cliente).filter(Cliente.id == factura.cliente_id).one_or_none()
+    pdf = build_factura_pdf(factura, tenant, cliente)
     return Response(content=pdf, media_type="application/pdf",
                     headers={"Content-Disposition": f'inline; filename="{factura.serie}{factura.folio}.pdf"'})
 
@@ -535,12 +543,8 @@ def enviar_factura(
         )
 
     xml = _xml_de(factura)
-    try:
-        pdf = FacturamaClient.from_settings(settings).download_pdf(factura.facturama_id)
-    except FacturamaError as exc:
-        raise HTTPException(status_code=502, detail=f"No se pudo obtener el PDF: {exc}")
-
     cliente = db.query(Cliente).filter(Cliente.id == factura.cliente_id).one_or_none()
+    pdf = build_factura_pdf(factura, tenant, cliente)
     nombre_archivo = f"{factura.serie}{factura.folio}"
     subject = f"Factura {nombre_archivo}" + (f" — {tenant.legal_name}" if tenant.legal_name else "")
     mensaje_html = f"<p>{payload.mensaje}</p>" if payload.mensaje else ""

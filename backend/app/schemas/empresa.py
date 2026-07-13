@@ -12,6 +12,7 @@ class EmpresaOut(BaseModel):
     regimen_fiscal_sat: str = ""
     domicilio_fiscal_cp: str = ""
     domicilio_fiscal: Dict[str, Any] = Field(default_factory=dict)
+    has_logo: bool = False
 
 
 class EmpresaUpdate(BaseModel):

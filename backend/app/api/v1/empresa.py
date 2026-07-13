@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import base64
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -37,19 +37,29 @@ def _load_tenant(db: Session, tenant_id) -> Tenant:
     return tenant
 
 
-@router.get("", response_model=EmpresaOut)
-def get_empresa(
-    db: Session = Depends(get_db),
-    ctx: AuthContext = Depends(require_permission(_WRITE)),
-):
-    tenant = _load_tenant(db, ctx.tenant_id)
+def _empresa_out(tenant: Tenant) -> EmpresaOut:
     return EmpresaOut(
         legal_name=tenant.legal_name or "",
         rfc=tenant.rfc or "",
         regimen_fiscal_sat=tenant.regimen_fiscal_sat or "",
         domicilio_fiscal_cp=tenant.domicilio_fiscal_cp or "",
         domicilio_fiscal=tenant.domicilio_fiscal or {},
+        has_logo=tenant.logo is not None,
     )
+
+
+# Tipos de imagen aceptados para el logo (los que reportlab/PIL renderiza bien).
+_LOGO_MIMES = {"image/png", "image/jpeg", "image/jpg", "image/webp"}
+_LOGO_MAX_BYTES = 2 * 1024 * 1024  # 2 MB
+
+
+@router.get("", response_model=EmpresaOut)
+def get_empresa(
+    db: Session = Depends(get_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    tenant = _load_tenant(db, ctx.tenant_id)
+    return _empresa_out(tenant)
 
 
 @router.put("", response_model=EmpresaOut)
@@ -77,13 +87,57 @@ def put_empresa(
     db.commit()
     db.refresh(tenant)
 
-    return EmpresaOut(
-        legal_name=tenant.legal_name or "",
-        rfc=tenant.rfc or "",
-        regimen_fiscal_sat=tenant.regimen_fiscal_sat or "",
-        domicilio_fiscal_cp=tenant.domicilio_fiscal_cp or "",
-        domicilio_fiscal=tenant.domicilio_fiscal or {},
-    )
+    return _empresa_out(tenant)
+
+
+@router.post("/logo", response_model=EmpresaOut)
+def subir_logo(
+    logo: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """Guarda el logo del emisor (PNG/JPG/WebP) para la representación impresa."""
+    mime = (logo.content_type or "").lower()
+    if mime not in _LOGO_MIMES:
+        raise HTTPException(status_code=422, detail="El logo debe ser PNG, JPG o WebP")
+    data = logo.file.read()
+    if not data:
+        raise HTTPException(status_code=422, detail="El archivo está vacío")
+    if len(data) > _LOGO_MAX_BYTES:
+        raise HTTPException(status_code=422, detail="El logo no debe exceder 2 MB")
+
+    tenant = _load_tenant(db, ctx.tenant_id)
+    tenant.logo = data
+    tenant.logo_mime = "image/jpeg" if mime == "image/jpg" else mime
+    db.commit()
+    db.refresh(tenant)
+    return _empresa_out(tenant)
+
+
+@router.get("/logo")
+def obtener_logo(
+    db: Session = Depends(get_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """Devuelve el logo del emisor (para previsualizarlo en Ajustes › Empresa)."""
+    tenant = _load_tenant(db, ctx.tenant_id)
+    if not tenant.logo:
+        raise HTTPException(status_code=404, detail="La empresa no tiene logo")
+    return Response(content=tenant.logo, media_type=tenant.logo_mime or "image/png",
+                    headers={"Cache-Control": "no-store"})
+
+
+@router.delete("/logo", response_model=EmpresaOut)
+def borrar_logo(
+    db: Session = Depends(get_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    tenant = _load_tenant(db, ctx.tenant_id)
+    tenant.logo = None
+    tenant.logo_mime = None
+    db.commit()
+    db.refresh(tenant)
+    return _empresa_out(tenant)
 
 
 @router.post("/csd")

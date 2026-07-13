@@ -16,6 +16,7 @@ from sqlalchemy import (
     Enum,
     ForeignKey,
     Integer,
+    LargeBinary,
     String,
     UniqueConstraint,
 )
@@ -46,6 +47,9 @@ class Tenant(Base, TimestampMixin, SoftDeleteMixin):
     domicilio_fiscal_cp = Column(String(5), nullable=False)
     domicilio_fiscal = Column(JSONB, nullable=False, server_default="{}")
     config = Column(JSONB, nullable=False, server_default="{}")
+    # Logo del emisor para la representación impresa (subido en Ajustes › Empresa).
+    logo = Column(LargeBinary)
+    logo_mime = Column(String(50))
     plan = Column(String(50), nullable=False, server_default="trial")
     seats_limit = Column(Integer, nullable=False, server_default="3")
     trial_ends_at = Column(Date)

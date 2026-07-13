@@ -18,7 +18,7 @@ from uuid import UUID
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from ...core.rbac import AuthContext, get_tenant_db, require_permission
 from ...models import (
@@ -89,7 +89,11 @@ def list_remisiones(
     db: Session = Depends(get_tenant_db),
     ctx: AuthContext = Depends(require_permission(_READ)),
 ):
-    query = db.query(Remision).filter(Remision.deleted_at.is_(None))
+    query = (
+        db.query(Remision)
+        .options(joinedload(Remision.factura))
+        .filter(Remision.deleted_at.is_(None))
+    )
     if estado:
         query = query.filter(Remision.estado == estado)
     if cliente_id is not None:
