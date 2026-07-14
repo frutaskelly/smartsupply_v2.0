@@ -27,6 +27,7 @@ from ...models import (
     Factura,
     LineaFactura,
     LoteInventario,
+    Merma,
     Producto,
     Remision,
     Tenant,
@@ -90,8 +91,8 @@ def _fiscal_calc(prod, esq, importe: Decimal, cantidad: Decimal) -> dict:
 
 
 def _release_remision_stock(db: Session, rems, ctx, factura) -> None:
-    """Devuelve a 'disponible' el stock reservado por remisiones CONFIRMADAS
-    (motivo 03 de cancelación de factura: la operación no se llevó a cabo)."""
+    """Devuelve a 'disponible' el stock reservado por remisiones CONFIRMADAS/
+    FACTURADAS al cancelar su factura (quedan liberadas como BORRADOR)."""
     prod_ids = {ln.producto_id for r in rems for ln in r.lineas if ln.lote_id}
     productos = {p.id: p for p in db.query(Producto).filter(Producto.id.in_(prod_ids)).all()}
     for r in rems:
@@ -118,7 +119,45 @@ def _release_remision_stock(db: Session, rems, ctx, factura) -> None:
             db.add(build_movimiento(
                 ctx.tenant_id, ctx.user_id, lote, "CANCELACION_REMISION", cantidad,
                 ref_tipo="FACTURA", ref_id=factura.id,
-                motivo=f"Cancelación factura {factura.serie}{factura.folio} (motivo 03)",
+                motivo=f"Cancelación factura {factura.serie}{factura.folio}",
+            ))
+
+
+def _writeoff_remision_stock(db: Session, rems, ctx, factura) -> None:
+    """Da de baja como MERMA el stock reservado por las remisiones al cancelar su
+    factura con 'Pérdida por cancelación': la mercancía NO regresa al almacén
+    (se libera la reserva sin sumar a disponible) y se registra una merma."""
+    prod_ids = {ln.producto_id for r in rems for ln in r.lineas if ln.lote_id}
+    productos = {p.id: p for p in db.query(Producto).filter(Producto.id.in_(prod_ids)).all()}
+    for r in rems:
+        if r.estado not in ("CONFIRMADA", "FACTURADA"):
+            continue
+        for ln in r.lineas:
+            if ln.lote_id is None:
+                continue
+            lote = (
+                db.query(LoteInventario)
+                .filter(LoteInventario.id == ln.lote_id)
+                .with_for_update()
+                .one_or_none()
+            )
+            if lote is None:
+                continue
+            if ln.cantidad_surtida is not None:
+                cantidad = Decimal(ln.cantidad_surtida)
+            else:
+                cantidad = Decimal(ln.cantidad_solicitada) * presentacion_factor(
+                    productos.get(ln.producto_id), ln.presentacion)
+            # Libera la reserva pero NO regresa a disponible → la mercancía se pierde.
+            lote.cantidad_reservada = max(ZERO, lote.cantidad_reservada - cantidad)
+            desc = f"Pérdida por cancelación factura {factura.serie}{factura.folio}"
+            db.add(Merma(
+                tenant_id=ctx.tenant_id, lote_id=lote.id, cantidad=cantidad,
+                motivo="OTRO", descripcion=desc, created_by=ctx.user_id,
+            ))
+            db.add(build_movimiento(
+                ctx.tenant_id, ctx.user_id, lote, "MERMA", -cantidad,
+                ref_tipo="FACTURA", ref_id=factura.id, motivo=desc,
             ))
 
 
@@ -212,6 +251,13 @@ def factura_desde_remisiones(
         serie_codigo = payload.serie or "A"
         folio = _next_folio(db, ctx.tenant_id, serie_codigo)
 
+    # La(s) nota(s) de la(s) remisión(es) se transfieren a la factura. Si el
+    # payload trae una nota explícita, esa manda; si no, se unen las notas
+    # distintas y no vacías de las remisiones facturadas.
+    notas_factura = payload.notas or "; ".join(
+        dict.fromkeys(r.notas.strip() for r in rems if r.notas and r.notas.strip())
+    ) or None
+
     factura = Factura(
         tenant_id=ctx.tenant_id, serie=serie_codigo, folio=folio,
         cliente_id=cliente.id,
@@ -219,7 +265,7 @@ def factura_desde_remisiones(
         forma_pago=payload.forma_pago or cliente.forma_pago_default or "99",
         metodo_pago=payload.metodo_pago or cliente.metodo_pago_default or "PPD",
         lugar_expedicion=tenant.domicilio_fiscal_cp,
-        notas=payload.notas, created_by=ctx.user_id, estado="BORRADOR",
+        notas=notas_factura, created_by=ctx.user_id, estado="BORRADOR",
     )
     db.add(factura); db.flush()
 
@@ -461,25 +507,22 @@ def cancelar_factura(
     factura.uuid_sustitucion = str(payload.uuid_sustitucion) if payload.uuid_sustitucion else None
 
     rems = db.query(Remision).filter(Remision.factura_id == factura.id).all()
-    if payload.motivo == "03":
-        # "No se llevó a cabo la operación": la venta NO ocurrió → se devuelve el
-        # inventario reservado y la(s) remisión(es) quedan CANCELADAS (no se
-        # refacturan, porque no hubo operación).
-        _release_remision_stock(db, rems, ctx, factura)
-        for r in rems:
-            if r.estado in ("CONFIRMADA", "FACTURADA"):
-                r.estado = "CANCELADA"
-            # factura_id se conserva apuntando a la factura cancelada (para la
-            # columna "Factura" de la lista); la remisión CANCELADA no se refactura.
+    # Qué hacer con el inventario reservado por las remisiones (elegido al cancelar):
+    if payload.inventario == "perdida":
+        # Pérdida por cancelación: la mercancía NO regresa (se da de baja como
+        # merma) y las remisiones quedan CANCELADAS (no refacturables).
+        _writeoff_remision_stock(db, rems, ctx, factura)
+        nuevo_estado = "CANCELADA"
     else:
-        # 01/02/04 (errores/sustitución/global): la operación sí ocurre y se
-        # reexpide → se liberan las remisiones para refacturar; el inventario
-        # permanece reservado (la mercancía sigue saliendo). Vuelven a CONFIRMADA.
-        # factura_id se conserva (factura cancelada); la refacturabilidad se
-        # deriva de que esa factura esté CANCELADA (ver factura_desde_remisiones).
-        for r in rems:
-            if r.estado == "FACTURADA":
-                r.estado = "CONFIRMADA"
+        # Devolución a almacén (default): el inventario regresa a disponible y las
+        # remisiones se liberan a BORRADOR para poder volver a facturarlas.
+        _release_remision_stock(db, rems, ctx, factura)
+        nuevo_estado = "BORRADOR"
+    # factura_id se conserva apuntando a la factura CANCELADA (al refacturar se
+    # sobreescribe con la nueva).
+    for r in rems:
+        if r.estado in ("CONFIRMADA", "FACTURADA"):
+            r.estado = nuevo_estado
     db.flush()
     db.refresh(factura)
     return factura

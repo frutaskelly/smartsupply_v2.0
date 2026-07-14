@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, EmailStr, Field
 
@@ -35,6 +35,10 @@ class CancelarFacturaIn(BaseModel):
     # 03 no se llevó a cabo | 04 operación nominativa en factura global
     motivo: str = Field(default="02", pattern="^0[1-4]$")
     uuid_sustitucion: Optional[uuid.UUID] = None
+    # Qué hacer con el inventario reservado por las remisiones de la factura:
+    #  - "devolucion": regresa a disponible; las remisiones vuelven a BORRADOR.
+    #  - "perdida": se da de baja como MERMA (no regresa); remisiones CANCELADAS.
+    inventario: Literal["devolucion", "perdida"] = "devolucion"
 
 
 class LineaFacturaDirectaIn(BaseModel):

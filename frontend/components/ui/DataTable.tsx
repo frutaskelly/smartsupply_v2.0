@@ -107,6 +107,10 @@ export type DataTableProps<T> = {
   rowKey?: (row: T, index: number) => string | number;
   /** Se llama al expandir una fila (útil para cargar el detalle bajo demanda). */
   onRowExpand?: (row: T) => void;
+  /** Clave (rowKey) de la fila a expandir automáticamente al montar — para
+   *  deep-links (p. ej. llegar a Facturas con una factura ya abierta). Se aplica
+   *  una sola vez, cuando esa fila ya está en `rows`. */
+  initialExpandedKey?: string | number;
   /** Columna de acciones por fila: una lista de íconos (Ver/Editar/Eliminar…).
    *  Se renderiza fija al final. */
   actions?: RowAction<T>[];
@@ -152,6 +156,7 @@ export function DataTable<T>({
   renderExpanded,
   rowKey,
   onRowExpand,
+  initialExpandedKey,
   actions,
   actionsMenu,
   columnsMenu,
@@ -208,6 +213,20 @@ export function DataTable<T>({
   // Se guarda el `rowKey` de cada fila seleccionada (persiste entre orden,
   // búsqueda y paginación, que solo cambian qué filas se muestran).
   const keyOf = (row: T, index: number): string | number => (rowKey ? rowKey(row, index) : index);
+
+  // Deep-link: expande automáticamente la fila `initialExpandedKey` una sola vez,
+  // cuando ya llegó a `rows`. No re-expande si el usuario la cierra ni al recargar.
+  const appliedInitialExpand = useRef(false);
+  useEffect(() => {
+    if (appliedInitialExpand.current || initialExpandedKey == null) return;
+    const idx = rows.findIndex((r, i) => keyOf(r, i) === initialExpandedKey);
+    if (idx < 0) return; // aún no cargan las filas
+    appliedInitialExpand.current = true;
+    setExpanded((prev) => new Set(prev).add(initialExpandedKey));
+    onRowExpand?.(rows[idx]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialExpandedKey, rows]);
+
   const [selectedKeys, setSelectedKeys] = useState<Set<string | number>>(new Set());
   // Limpia la selección cuando el padre cambia `selectionResetKey`.
   useEffect(() => {

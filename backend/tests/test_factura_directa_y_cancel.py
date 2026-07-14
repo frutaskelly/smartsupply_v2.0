@@ -1,8 +1,7 @@
 """Nuevas funciones P6.x:
   - Factura DIRECTA (sin remisión, sin afectar inventario).
-  - Cancelación de factura con efecto en inventario según el MOTIVO:
-      * motivo 03 (no se llevó a cabo) → devuelve inventario, remisión CANCELADA.
-      * motivo 02 (errores) → libera la remisión para refacturar, inventario sigue reservado.
+  - Cancelación de factura: sus remisiones se LIBERAN a BORRADOR (refacturables)
+    y se devuelve el inventario reservado — sin importar el motivo SAT.
 El PAC (Facturama) se mockea.
 """
 import uuid
@@ -155,12 +154,12 @@ def test_cancel_motivo_02_libera_para_refacturar(client, env, auth, fake_pac):
 
     r = client.post(f"/api/v1/facturas/{fac_id}/cancelar", headers=_h(env), json={"motivo": "02"})
     assert r.status_code == 200, r.text
-    # inventario NO cambia (la mercancía sigue saliendo, se refactura)
-    assert _disponible(env) == (Decimal("70"), Decimal("30"))
-    # remisión vuelve a CONFIRMADA y refacturable (su factura quedó CANCELADA;
+    # el inventario reservado se devuelve (la remisión vuelve a BORRADOR)
+    assert _disponible(env) == (Decimal("100"), Decimal("0"))
+    # remisión LIBERADA a BORRADOR y refacturable (su factura quedó CANCELADA;
     # factura_id se conserva para mostrarla en la columna "Factura")
     det = client.get(f"/api/v1/remisiones/{rem_id}", headers=_h(env)).json()
-    assert det["estado"] == "CONFIRMADA"
+    assert det["estado"] == "BORRADOR"
     assert det["factura_estado"] == "CANCELADA"
     refac = client.post("/api/v1/facturas/desde-remisiones", headers=_h(env),
                         json={"remision_ids": [rem_id]})
@@ -188,6 +187,22 @@ def test_cancel_motivo_03_devuelve_inventario(client, env, auth, fake_pac):
     assert r.status_code == 200, r.text
     # inventario devuelto: 100 disponible, 0 reservada
     assert _disponible(env) == (Decimal("100"), Decimal("0"))
-    # remisión CANCELADA (no refacturable)
+    # remisión LIBERADA a BORRADOR (refacturable)
+    det = client.get(f"/api/v1/remisiones/{rem_id}", headers=_h(env)).json()
+    assert det["estado"] == "BORRADOR"
+
+
+def test_cancel_inventario_perdida_da_de_baja(client, env, auth, fake_pac):
+    """inventario='perdida': la mercancía NO regresa (reserva liberada, disponible
+    igual → se pierde) y la remisión queda CANCELADA (no refacturable)."""
+    rem_id, fac_id = _remision_facturada_timbrada(client, env)
+    assert _disponible(env) == (Decimal("70"), Decimal("30"))
+
+    r = client.post(f"/api/v1/facturas/{fac_id}/cancelar", headers=_h(env),
+                    json={"motivo": "02", "inventario": "perdida"})
+    assert r.status_code == 200, r.text
+    # reserva liberada pero NO regresa a disponible: 70 disp, 0 reservada (30 perdidos)
+    assert _disponible(env) == (Decimal("70"), Decimal("0"))
+    # remisión CANCELADA (mercancía perdida, no refacturable)
     det = client.get(f"/api/v1/remisiones/{rem_id}", headers=_h(env)).json()
     assert det["estado"] == "CANCELADA"

@@ -34,6 +34,14 @@ export default function FacturasPage() {
   const { me } = useAuth();
   const toast = useToast();
   const canWrite = can(me, WRITE);
+
+  // Deep-link desde Remisiones (?ver=<factura_id>): abre esa factura con su
+  // slide-down. Se lee de window (client-only) para no forzar Suspense.
+  const [verId, setVerId] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search).get("ver");
+    if (p) setVerId(p);
+  }, []);
   const { status: onboardingStatus } = useOnboarding();
   const ambiente = onboardingStatus?.ambiente ?? "sandbox";
 
@@ -97,10 +105,12 @@ export default function FacturasPage() {
   const [toCancel, setToCancel] = useState<Factura | null>(null);
   const [toDescartar, setToDescartar] = useState<Factura | null>(null);
   // Motivo de cancelación SAT (01–04). 01 requiere UUID de la factura que
-  // sustituye; 03 ("no se llevó a cabo") es el único que libera el inventario
-  // reservado por las remisiones (backend _release_remision_stock).
+  // sustituye. Sea cual sea el motivo, al cancelar las remisiones se liberan a
+  // BORRADOR y se devuelve su inventario (backend _release_remision_stock).
   const [cancelMotivo, setCancelMotivo] = useState("02");
   const [cancelSustitucion, setCancelSustitucion] = useState("");
+  // Qué hacer con el inventario al cancelar: devolución a almacén o pérdida.
+  const [cancelInventario, setCancelInventario] = useState<"devolucion" | "perdida">("devolucion");
   const [actBusy, setActBusy] = useState(false);
 
   // ── enviar por correo ──
@@ -188,7 +198,8 @@ export default function FacturasPage() {
     }
     setActBusy(true);
     try {
-      const body: { motivo: string; uuid_sustitucion?: string } = { motivo: cancelMotivo };
+      const body: { motivo: string; uuid_sustitucion?: string; inventario: string } =
+        { motivo: cancelMotivo, inventario: cancelInventario };
       if (cancelMotivo === "01") body.uuid_sustitucion = cancelSustitucion.trim();
       await apiFetch(`/api/v1/facturas/${toCancel.id}/cancelar`, {
         method: "POST", body: JSON.stringify(body),
@@ -297,6 +308,7 @@ export default function FacturasPage() {
         actions={rowActions}
         onRowExpand={verDetalle}
         renderExpanded={renderDetalle}
+        initialExpandedKey={verId}
         storageKey="facturas"
       />
 
@@ -386,12 +398,21 @@ export default function FacturasPage() {
               />
             </Field>
           )}
-          {cancelMotivo === "03" && (
-            <Alert tone="warning">
-              El motivo 03 libera el inventario reservado por las remisiones de esta factura
-              (vuelven a estar disponibles para refacturar).
-            </Alert>
-          )}
+          <Field label="¿Qué hacer con el inventario?">
+            <Select value={cancelInventario} onChange={(e) => setCancelInventario(e.target.value as "devolucion" | "perdida")}>
+              <option value="devolucion">Devolución a almacén (regresa a existencias)</option>
+              <option value="perdida">Pérdida por cancelación (se da de baja como merma)</option>
+            </Select>
+          </Field>
+          <Alert tone="warning">
+            {cancelInventario === "perdida" ? (
+              <>El inventario reservado se <strong>da de baja como merma</strong> (no regresa a existencias)
+              {" "}y las remisiones quedan <strong>CANCELADAS</strong> (no se pueden volver a facturar).</>
+            ) : (
+              <>El inventario reservado <strong>regresa a existencias</strong> y las remisiones se
+              {" "}liberan a <strong>BORRADOR</strong>, para poder <strong>volver a facturarse</strong>.</>
+            )}
+          </Alert>
         </div>
       </Modal>
 

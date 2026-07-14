@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Check, ClipboardPaste, FileText, Mail, Plus, Printer, Trash2, X } from "lucide-react";
 
 import { KeyboardCombobox, type ComboOption } from "@/components/KeyboardCombobox";
@@ -86,6 +87,7 @@ export default function RemisionesPage() {
   const toast = useToast();
   const canWrite = can(me, WRITE);
   const { post, loading: saving } = useMutation();
+  const router = useRouter();
 
   // catálogos
   const clientesRes = useResource<Page<Cliente>>("/api/v1/clientes?limit=200");
@@ -435,12 +437,13 @@ export default function RemisionesPage() {
     toast.success(`${valores.length} productos pegados`);
   }
 
-  async function guardar(confirmar = false) {
-    if (saving) return; // evita doble envío (doble clic / doble disparo)
-    if (!clienteId) { toast.error("Elige un cliente"); return; }
+  // Construye el payload de creación desde el formulario. Devuelve null (con
+  // toast) si falta el cliente o líneas válidas.
+  function construirPayload() {
+    if (!clienteId) { toast.error("Elige un cliente"); return null; }
     const lns = lineas.filter((l) => l.producto_id && Number(l.cantidad) > 0);
-    if (lns.length === 0) { toast.error("Agrega al menos una línea con producto y cantidad"); return; }
-    const payload = {
+    if (lns.length === 0) { toast.error("Agrega al menos una línea con producto y cantidad"); return null; }
+    return {
       cliente_facturacion_id: clienteId,
       sucursal_id: sucursalId || null,
       almacen_id: almacenId || null,
@@ -454,22 +457,46 @@ export default function RemisionesPage() {
         precio_unitario: l.precioManual && l.precio ? l.precio : undefined,
       })),
     };
+  }
+
+  // "Guardar" del alta: valida y abre el diálogo de elección (Borrador vs
+  // Confirmar salida). No crea nada todavía.
+  function abrirGuardar() {
+    if (saving) return;
+    if (!construirPayload()) return; // valida (togglea el toast si falta algo)
+    setGuardarChoiceOpen(true);
+  }
+
+  // Opción "Borrador": crea la remisión en BORRADOR, sin afectar inventario.
+  async function guardarBorrador() {
+    if (saving) return; // evita doble envío
+    const payload = construirPayload();
+    if (!payload) return;
+    setGuardarChoiceOpen(false);
     try {
-      // `post` (useMutation) activa `saving`, que deshabilita el botón mientras
-      // se crea — así un segundo clic/disparo no genera una remisión duplicada.
       const rem = await post<RemisionDetail>("/api/v1/remisiones", payload);
-      if (confirmar) {
-        // Mismo flujo que el ícono Confirmar de la tabla: reserva inventario y,
-        // si falta existencia, abre el popup de sobregiro. Pase lo que pase
-        // (confirmado o popup abierto), SALIMOS del alta al listado: el borrador
-        // ya existe, así un reintento no crea una remisión duplicada. Si el
-        // popup sigue abierto, flota sobre el listado y el usuario decide ahí.
-        await confirmarRemision(rem.id, rem.folio_interno);
-        setMode("list");
-        reload();
-        return;
-      }
       toast.success(`Remisión ${rem.folio_interno} guardada (borrador)`);
+      resetForm();
+      setMode("list");
+      reload();
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudo crear la remisión");
+    }
+  }
+
+  // Opción "Confirmar salida (Inventario)": crea la remisión y la confirma
+  // (reserva/descuenta inventario). Sin existencia → confirmarRemision abre el
+  // popup de sobregiro. Pase lo que pase salimos al listado: el borrador ya
+  // existe, así un reintento no duplica (el popup flota sobre la lista).
+  async function guardarYConfirmar() {
+    if (saving) return;
+    const payload = construirPayload();
+    if (!payload) return;
+    setGuardarChoiceOpen(false);
+    try {
+      const rem = await post<RemisionDetail>("/api/v1/remisiones", payload);
+      await confirmarRemision(rem.id, rem.folio_interno);
+      resetForm();
       setMode("list");
       reload();
     } catch (e) {
@@ -483,6 +510,8 @@ export default function RemisionesPage() {
   const [detalleLoading, setDetalleLoading] = useState<Set<string>>(new Set());
   const [toConfirm, setToConfirm] = useState<Remision | null>(null);
   const [toCancel, setToCancel] = useState<Remision | null>(null);
+  // Diálogo de elección al guardar el alta: Borrador vs Confirmar salida.
+  const [guardarChoiceOpen, setGuardarChoiceOpen] = useState(false);
   // Sobregiro: cuando confirmar falla por existencia insuficiente, ofrecemos
   // confirmar de todas formas dejando el inventario en negativo.
   const [negStock, setNegStock] = useState<{ remId: string; folio: string } | null>(null);
@@ -689,7 +718,7 @@ export default function RemisionesPage() {
   const [facturarOpen, setFacturarOpen] = useState(false);
   // Facturas que fallaron por existencia y esperan decisión de sobregiro.
   const [facturarSobregiro, setFacturarSobregiro] = useState<
-    { grupos: string[][]; agrupar: boolean; creadas: number; omitidas: number; otras: number } | null
+    { grupos: string[][]; agrupar: boolean; timbradas: number; borrador: number; omitidas: number; otras: number } | null
   >(null);
   const [confirmarBulkOpen, setConfirmarBulkOpen] = useState(false);
   // Remisiones del lote sin existencia que esperan decisión de sobregiro.
@@ -831,28 +860,47 @@ export default function RemisionesPage() {
     grupos: string[][],
     agrupar_productos: boolean,
     permitir_negativos: boolean,
-  ): Promise<{ creadas: number; sinStock: string[][]; otras: number }> {
-    const results = await Promise.allSettled(
-      grupos.map((remision_ids) =>
-        post("/api/v1/facturas/desde-remisiones", { remision_ids, agrupar_productos, permitir_negativos }),
-      ),
+  ): Promise<{ timbradas: number; sinStock: string[][]; borrador: number; otras: number }> {
+    // Facturar directo: por cada grupo se crea la factura y SE TIMBRA de inmediato.
+    // Si el PAC rechaza (o Facturama no está listo), la factura queda en BORRADOR
+    // y se puede reintentar/descartar desde Facturas — no se pierde el trabajo.
+    const resultados = await Promise.all(
+      grupos.map(async (remision_ids): Promise<"timbrada" | "borrador" | "sinStock" | "otra"> => {
+        let fac: { id: string };
+        try {
+          fac = await post<{ id: string }>(
+            "/api/v1/facturas/desde-remisiones",
+            { remision_ids, agrupar_productos, permitir_negativos },
+          );
+        } catch (e) {
+          if (e instanceof ApiError && /existencia insuficiente/i.test(e.message)) return "sinStock";
+          return "otra";
+        }
+        try {
+          await post(`/api/v1/facturas/${fac.id}/timbrar`);
+          return "timbrada";
+        } catch {
+          return "borrador"; // creada pero el timbrado falló
+        }
+      }),
     );
     const sinStock: string[][] = [];
-    let creadas = 0;
-    let otras = 0;
-    results.forEach((res, i) => {
-      if (res.status === "fulfilled") creadas += 1;
-      else if (res.reason instanceof ApiError && /existencia insuficiente/i.test(res.reason.message)) sinStock.push(grupos[i]);
+    let timbradas = 0, borrador = 0, otras = 0;
+    resultados.forEach((r, i) => {
+      if (r === "timbrada") timbradas += 1;
+      else if (r === "borrador") borrador += 1;
+      else if (r === "sinStock") sinStock.push(grupos[i]);
       else otras += 1;
     });
-    return { creadas, sinStock, otras };
+    return { timbradas, sinStock, borrador, otras };
   }
 
-  function reportarFacturar(creadas: number, fallidas: number, omitidas: number) {
-    const partes = [`Facturas creadas: ${creadas}`];
+  function reportarFacturar(timbradas: number, borrador: number, fallidas: number, omitidas: number) {
+    const partes = [`Facturas timbradas: ${timbradas}`];
+    if (borrador) partes.push(`${borrador} sin timbrar (quedaron en borrador, revisa en Facturas)`);
     if (fallidas) partes.push(`${fallidas} fallidas`);
     if (omitidas) partes.push(`${omitidas} omitidas`);
-    toast[fallidas === 0 ? "success" : "error"](partes.join(" · "));
+    toast[borrador === 0 && fallidas === 0 ? "success" : "error"](partes.join(" · "));
     clearSelection();
     reload();
   }
@@ -882,14 +930,14 @@ export default function RemisionesPage() {
     const agrupar_productos = modo === "sumar";
     setBulkBusy(true);
     try {
-      const { creadas, sinStock, otras } = await enviarFacturas(grupos, agrupar_productos, false);
+      const { timbradas, sinStock, borrador, otras } = await enviarFacturas(grupos, agrupar_productos, false);
       setFacturarOpen(false);
       if (sinStock.length > 0) {
-        // Hay borradores sin existencia: ofrece facturar con sobregiro.
-        setFacturarSobregiro({ grupos: sinStock, agrupar: agrupar_productos, creadas, omitidas, otras });
+        // Hay remisiones sin existencia: ofrece facturar con sobregiro.
+        setFacturarSobregiro({ grupos: sinStock, agrupar: agrupar_productos, timbradas, borrador, omitidas, otras });
         return;
       }
-      reportarFacturar(creadas, otras, omitidas);
+      reportarFacturar(timbradas, borrador, otras, omitidas);
     } finally {
       setBulkBusy(false);
     }
@@ -899,12 +947,12 @@ export default function RemisionesPage() {
   // falta de existencia al auto-confirmar un borrador.
   async function confirmarFacturarSobregiro() {
     if (!facturarSobregiro) return;
-    const { grupos, agrupar, creadas, omitidas, otras } = facturarSobregiro;
+    const { grupos, agrupar, timbradas, borrador, omitidas, otras } = facturarSobregiro;
     setBulkBusy(true);
     try {
       const r = await enviarFacturas(grupos, agrupar, true);
       setFacturarSobregiro(null);
-      reportarFacturar(creadas + r.creadas, otras + r.otras, omitidas);
+      reportarFacturar(timbradas + r.timbradas, borrador + r.borrador, otras + r.otras, omitidas);
     } finally {
       setBulkBusy(false);
     }
@@ -912,10 +960,10 @@ export default function RemisionesPage() {
 
   function declinarFacturarSobregiro() {
     if (!facturarSobregiro) return;
-    const { grupos, creadas, omitidas, otras } = facturarSobregiro;
+    const { grupos, timbradas, borrador, omitidas, otras } = facturarSobregiro;
     setFacturarSobregiro(null);
     // Las que no se facturaron por falta de existencia cuentan como fallidas.
-    reportarFacturar(creadas, otras + grupos.length, omitidas);
+    reportarFacturar(timbradas, borrador, otras + grupos.length, omitidas);
   }
 
   const columns: Column<Remision>[] = [
@@ -927,7 +975,18 @@ export default function RemisionesPage() {
       cell: (r) =>
         r.factura_folio ? (
           <span className="inline-flex items-center gap-1.5">
-            <span className="font-medium">{r.factura_folio}</span>
+            {r.factura_id ? (
+              <button
+                type="button"
+                title="Ver la factura"
+                onClick={(e) => { e.stopPropagation(); router.push(`/facturas?ver=${r.factura_id}`); }}
+                className="font-medium text-accent hover:underline"
+              >
+                {r.factura_folio}
+              </button>
+            ) : (
+              <span className="font-medium">{r.factura_folio}</span>
+            )}
             {r.factura_estado && (
               <Badge tone={FACTURA_TONE[r.factura_estado] ?? "muted"}>{r.factura_estado}</Badge>
             )}
@@ -1109,8 +1168,7 @@ export default function RemisionesPage() {
               </div>
               <div className="flex gap-2">
                 <Button variant="secondary" onClick={resetForm} disabled={saving}>Borrar</Button>
-                <Button variant="secondary" onClick={() => guardar(false)} disabled={saving}>{saving ? "Guardando…" : "Guardar"}</Button>
-                <Button onClick={() => guardar(true)} disabled={saving}>{saving ? "Guardando…" : "Confirmar"}</Button>
+                <Button onClick={abrirGuardar} disabled={saving}>{saving ? "Guardando…" : "Guardar"}</Button>
               </div>
             </div>
           </div>
@@ -1120,6 +1178,21 @@ export default function RemisionesPage() {
           footer={<><Button variant="secondary" onClick={() => setPasteOpen(false)}>Cancelar</Button><Button onClick={procesarPaste}>Procesar</Button></>}>
           <p className="mb-2 text-sm text-muted">Pega columnas separadas por tabulador (una fila por línea): <strong>producto</strong> y, en cualquier orden, <strong>cantidad</strong>, <strong>precio</strong> y/o <strong>presentación</strong> — el sistema detecta cuál es cuál. El producto se cruza automáticamente.</p>
           <Textarea rows={8} value={pasteText} onChange={(e) => setPasteText(e.target.value)} placeholder={"zanahoria\t10\tKILO\njitomate\t5\t12.50"} />
+        </Modal>
+
+        <Modal open={guardarChoiceOpen} onClose={() => setGuardarChoiceOpen(false)} title="Guardar remisión"
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => setGuardarChoiceOpen(false)} disabled={saving}>Cancelar</Button>
+              <Button variant="secondary" onClick={guardarBorrador} disabled={saving}>Borrador</Button>
+              <Button onClick={guardarYConfirmar} disabled={saving}>Confirmar salida (Inventario)</Button>
+            </>
+          }>
+          <p className="mb-2 text-sm text-muted">Elige cómo guardar la remisión:</p>
+          <ul className="ml-4 list-disc space-y-1 text-sm text-muted">
+            <li><strong>Borrador</strong>: se guarda sin afectar el inventario.</li>
+            <li><strong>Confirmar salida (Inventario)</strong>: reserva y descuenta el inventario. Si no hay existencia suficiente, se ofrece remisionar en negativo (sobregiro).</li>
+          </ul>
         </Modal>
       </div>
     );
@@ -1298,6 +1371,8 @@ export default function RemisionesPage() {
         <p className="mb-3 text-sm text-muted">
           Se facturan las remisiones en <strong>borrador o confirmadas</strong> sin factura previa; el resto se omite.
           Un borrador se confirma automáticamente (reserva inventario) al facturar.
+          Cada factura <strong>se timbra de inmediato</strong> ante el PAC; si el timbrado falla,
+          queda en borrador para reintentar desde Facturas.
           Elige cómo generar la(s) factura(s):
         </p>
         {multiCliente && (

@@ -45,6 +45,12 @@ _TIPO_COMPROBANTE = {
 _ESTILO = ParagraphStyle("base", fontName="Helvetica", fontSize=8, leading=10)
 _ESTILO_MONO = ParagraphStyle("mono", fontName="Courier", fontSize=6, leading=7)
 _ESTILO_TIT = ParagraphStyle("tit", fontName="Helvetica-Bold", fontSize=8, leading=10)
+# Encabezado de columnas: texto oscuro legible sobre fondo claro (el color del
+# Paragraph gana sobre el TEXTCOLOR de la tabla, por eso se define aquí).
+_ESTILO_TH = ParagraphStyle("th", fontName="Helvetica-Bold", fontSize=8, leading=10,
+                            textColor=colors.HexColor("#334155"))
+_ESTILO_NOTE = ParagraphStyle("note", fontName="Helvetica", fontSize=8, leading=11,
+                              textColor=colors.HexColor("#475569"))
 
 
 def _money(v) -> str:
@@ -205,9 +211,24 @@ def build_factura_pdf(factura, tenant, cliente) -> bytes:
     story.append(rec)
     story.append(Spacer(1, 8))
 
+    # ── Notas (arriba de los conceptos) ──
+    if getattr(factura, "notas", None):
+        notas_tbl = Table(
+            [[_p("Notas", _ESTILO_TH)], [_p(_esc(factura.notas), _ESTILO_NOTE)]],
+            colWidths=[doc.width],
+        )
+        notas_tbl.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f8fafc")),
+            ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#e2e8f0")),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8), ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+            ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ]))
+        story.append(notas_tbl)
+        story.append(Spacer(1, 8))
+
     # ── Conceptos ──
     head = ["Cant.", "Unidad", "Clave SAT", "Descripción", "P. Unitario", "Importe"]
-    data = [[_p(f"<b>{h}</b>") for h in head]]
+    data = [[_p(h, _ESTILO_TH) for h in head]]
     for ln in sorted(factura.lineas, key=lambda x: x.numero_linea):
         data.append([
             _p(f"{Decimal(ln.cantidad):g}"),
@@ -222,15 +243,17 @@ def build_factura_pdf(factura, tenant, cliente) -> bytes:
         doc.width * 0.44, doc.width * 0.12, doc.width * 0.12,
     ], repeatRows=1)
     tabla.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e293b")),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#cbd5e1")),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        # Encabezado claro con texto oscuro (legible) y una regla que lo define.
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#eef2f7")),
+        ("LINEBELOW", (0, 0), (-1, 0), 1.0, colors.HexColor("#94a3b8")),
+        # Filas: líneas horizontales sutiles en vez de un grid pesado (moderno).
+        ("LINEBELOW", (0, 1), (-1, -1), 0.3, colors.HexColor("#e2e8f0")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("ALIGN", (0, 1), (0, -1), "RIGHT"),
         ("ALIGN", (4, 1), (5, -1), "RIGHT"),
         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8fafc")]),
-        ("LEFTPADDING", (0, 0), (-1, -1), 4), ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-        ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("LEFTPADDING", (0, 0), (-1, -1), 5), ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+        ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
     ]))
     story.append(tabla)
     story.append(Spacer(1, 6))
