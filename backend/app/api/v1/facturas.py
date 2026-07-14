@@ -333,7 +333,10 @@ def factura_directa(
         esq = esquemas.get(prod.esquema_impuesto_id) if prod and prod.esquema_impuesto_id else None
         cantidad = Decimal(ln.cantidad)
         valor_unitario = Decimal(ln.precio_unitario)
-        importe = (cantidad * valor_unitario).quantize(Decimal("0.0001"))
+        # A 2 decimales (centavos), como el resto del cálculo fiscal (fiscal._q):
+        # si la línea se guarda a 4 decimales, la suma de importes de líneas no
+        # cuadra con el subtotal del comprobante y el PAC rechaza el timbrado.
+        importe = (cantidad * valor_unitario).quantize(Decimal("0.01"))
         clave_unidad = presentacion_sat(prod, ln.presentacion) or (prod.unidad_sat if prod else "H87")
         calc = _fiscal_calc(prod, esq, importe, cantidad)
         calc_lineas.append(calc)
@@ -480,6 +483,37 @@ def cancelar_factura(
     db.flush()
     db.refresh(factura)
     return factura
+
+
+@router.delete("/{factura_id}", status_code=status.HTTP_204_NO_CONTENT)
+def descartar_factura(
+    factura_id: UUID,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """Descarta una factura en BORRADOR (nunca timbrada) y regresa sus remisiones
+    a CONFIRMADA para poder refacturarlas.
+
+    Al facturar desde remisiones, estas quedan FACTURADA apuntando a una factura
+    BORRADOR. Si el timbrado falla o nunca se timbra, sin esto las remisiones
+    quedarían bloqueadas para siempre (cancelar_factura exige TIMBRADA). Una
+    TIMBRADA se cancela ante el PAC vía /cancelar; una CANCELADA ya está cerrada.
+    """
+    factura = get_or_404(db, Factura, factura_id)
+    if factura.estado != "BORRADOR":
+        raise HTTPException(
+            status_code=409,
+            detail="Solo se descarta una factura en BORRADOR; una timbrada se cancela ante el PAC",
+        )
+    rems = db.query(Remision).filter(Remision.factura_id == factura.id).all()
+    for r in rems:
+        if r.estado == "FACTURADA":
+            r.estado = "CONFIRMADA"  # el inventario reservado se conserva
+        r.factura_id = None
+    db.query(LineaFactura).filter(LineaFactura.factura_id == factura.id).delete(synchronize_session=False)
+    db.delete(factura)
+    db.flush()
+    return None
 
 
 def _xml_de(factura: Factura) -> Optional[str]:

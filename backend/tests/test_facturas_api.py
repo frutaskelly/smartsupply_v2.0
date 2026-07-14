@@ -239,6 +239,48 @@ def test_remision_expone_factura_en_lista(client, env, auth_as):
     assert row["factura_estado"] == "BORRADOR"
 
 
+def test_descartar_factura_borrador_libera_remisiones(client, env, auth_as):
+    """Descartar una factura en BORRADOR regresa sus remisiones a CONFIRMADA y
+    permite refacturarlas (rompe el deadlock de la factura nunca timbrada)."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    rem_id = _remision_confirmada(client, h, env, qty="4", precio="20")
+    fac = client.post("/api/v1/facturas/desde-remisiones", headers=h, json={"remision_ids": [rem_id]}).json()
+    assert client.get(f"/api/v1/remisiones/{rem_id}", headers=h).json()["estado"] == "FACTURADA"
+
+    # descartar el borrador
+    d = client.delete(f"/api/v1/facturas/{fac['id']}", headers=h)
+    assert d.status_code == 204, d.text
+    # la factura ya no existe
+    assert client.get(f"/api/v1/facturas/{fac['id']}", headers=h).status_code == 404
+    # la remisión volvió a CONFIRMADA y perdió el vínculo a la factura
+    row = client.get(f"/api/v1/remisiones/{rem_id}", headers=h).json()
+    assert row["estado"] == "CONFIRMADA"
+    assert row.get("factura_id") in (None, "")
+    # y se puede refacturar
+    re = client.post("/api/v1/facturas/desde-remisiones", headers=h, json={"remision_ids": [rem_id]})
+    assert re.status_code == 201, re.text
+
+
+def test_descartar_solo_borrador(client, env, auth_as):
+    """Solo se descarta una factura en BORRADOR; inexistente → 404."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    assert client.delete(f"/api/v1/facturas/{uuid.uuid4()}", headers=h).status_code == 404
+
+
+def test_remision_facturada_no_se_cancela_ni_elimina(client, env, auth_as):
+    """Una remisión FACTURADA no se puede cancelar ni eliminar directo (409):
+    debe pasar por la cancelación de su factura (que libera el inventario)."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    rem_id = _remision_confirmada(client, h, env, qty="4", precio="20")
+    client.post("/api/v1/facturas/desde-remisiones", headers=h, json={"remision_ids": [rem_id]})
+    assert client.get(f"/api/v1/remisiones/{rem_id}", headers=h).json()["estado"] == "FACTURADA"
+
+    assert client.post(f"/api/v1/remisiones/{rem_id}/cancelar", headers=h).status_code == 409
+    assert client.delete(f"/api/v1/remisiones/{rem_id}", headers=h).status_code == 409
+    # sigue FACTURADA (no se tocó)
+    assert client.get(f"/api/v1/remisiones/{rem_id}", headers=h).json()["estado"] == "FACTURADA"
+
+
 def test_pdf_propio_es_pdf(client, env, auth_as):
     """El PDF de la factura lo genera la app (reportlab): responde un %PDF válido."""
     auth_as(env["admin"]); h = _hdr(env["admin"])

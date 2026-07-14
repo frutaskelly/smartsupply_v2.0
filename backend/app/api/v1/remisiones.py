@@ -304,6 +304,11 @@ def cancelar_remision(
     rem = get_or_404(db, Remision, rem_id)
     if rem.estado == "CANCELADA":
         raise HTTPException(status_code=409, detail="La remisión ya está cancelada")
+    if rem.estado == "FACTURADA":
+        raise HTTPException(
+            status_code=409,
+            detail="La remisión está facturada; cancela su factura primero (eso libera el inventario y permite refacturar)",
+        )
 
     if rem.estado == "CONFIRMADA":
         prod_ids = {ln.producto_id for ln in rem.lineas if ln.lote_id is not None}
@@ -432,6 +437,8 @@ def delete_remision(
     ctx: AuthContext = Depends(require_permission(_WRITE)),
 ):
     rem = get_or_404(db, Remision, rem_id)
+    if rem.estado == "FACTURADA":
+        raise HTTPException(status_code=409, detail="La remisión está facturada; cancela su factura antes de eliminarla")
     if rem.estado == "CONFIRMADA":
         raise HTTPException(status_code=409, detail="Cancela la remisión antes de eliminarla (libera inventario)")
     rem.deleted_at = func.now()
