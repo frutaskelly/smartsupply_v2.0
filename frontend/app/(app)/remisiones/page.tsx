@@ -460,9 +460,13 @@ export default function RemisionesPage() {
       const rem = await post<RemisionDetail>("/api/v1/remisiones", payload);
       if (confirmar) {
         // Mismo flujo que el ícono Confirmar de la tabla: reserva inventario y,
-        // si falta existencia, abre el popup de sobregiro. Al confirmar regresa
-        // al listado; si abre el popup, se queda para que el usuario decida.
-        await confirmarRemision(rem.id, rem.folio_interno, true);
+        // si falta existencia, abre el popup de sobregiro. Pase lo que pase
+        // (confirmado o popup abierto), SALIMOS del alta al listado: el borrador
+        // ya existe, así un reintento no crea una remisión duplicada. Si el
+        // popup sigue abierto, flota sobre el listado y el usuario decide ahí.
+        await confirmarRemision(rem.id, rem.folio_interno);
+        setMode("list");
+        reload();
         return;
       }
       toast.success(`Remisión ${rem.folio_interno} guardada (borrador)`);
@@ -541,12 +545,11 @@ export default function RemisionesPage() {
   // Confirma una remisión existente (reserva inventario). Si falta existencia,
   // abre el popup de sobregiro (inventario en negativo). Lógica ÚNICA que
   // comparten el ícono Confirmar de la tabla y el botón Confirmar del alta.
-  // `volverALista`: al confirmar OK, regresa al listado (lo usa el alta).
-  async function confirmarRemision(remId: string, folio: string, volverALista = false): Promise<boolean> {
+  // La navegación al listado la maneja quien llama (el alta hace setMode).
+  async function confirmarRemision(remId: string, folio: string): Promise<boolean> {
     try {
       await post(`/api/v1/remisiones/${remId}/confirmar`, {});
       toast.success(`Remisión ${folio} confirmada (inventario reservado)`);
-      if (volverALista) setMode("list");
       reload();
       return true;
     } catch (e) {

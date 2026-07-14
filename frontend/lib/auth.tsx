@@ -72,7 +72,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!token) return;
     let active = true;
-    setLoading(true);
+    // Spinner global SOLO en la primera resolución (me == null). Supabase rota
+    // el access_token en segundo plano (~cada hora / al reenfocar la pestaña),
+    // cambiando `token` y re-disparando este efecto; poner loading=true en esos
+    // refrescos desmontaría toda la app (el layout muestra Spinner mientras
+    // loading) y perdería formularios/modales a medio llenar. Por eso revalidamos
+    // en silencio cuando ya tenemos `me`.
+    if (!me) setLoading(true);
     apiFetch<Me>("/api/v1/auth/me")
       .then((data) => {
         if (!active) return;
@@ -90,6 +96,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       active = false;
     };
+    // `me` se lee para decidir el spinner inicial; no debe re-disparar el efecto.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
   const refreshMe = async () => {

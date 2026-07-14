@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { Download, Eye, FileCode2, Mail, Plus, Stamp, X } from "lucide-react";
+import { Download, Eye, FileCode2, Mail, Plus, Stamp, Trash2, X } from "lucide-react";
 
 import { Alert } from "@/components/ui/Alert";
 import { Badge } from "@/components/ui/Badge";
@@ -95,6 +95,7 @@ export default function FacturasPage() {
   const [detalleLoading, setDetalleLoading] = useState<Set<string>>(new Set());
   const [toTimbrar, setToTimbrar] = useState<Factura | null>(null);
   const [toCancel, setToCancel] = useState<Factura | null>(null);
+  const [toDescartar, setToDescartar] = useState<Factura | null>(null);
   // Motivo de cancelación SAT (01–04). 01 requiere UUID de la factura que
   // sustituye; 03 ("no se llevó a cabo") es el único que libera el inventario
   // reservado por las remisiones (backend _release_remision_stock).
@@ -199,6 +200,20 @@ export default function FacturasPage() {
       toast.error(e instanceof ApiError ? e.message : "No se pudo cancelar");
     } finally { setActBusy(false); }
   }
+  // Descarta una factura en BORRADOR (nunca timbrada): la elimina y regresa sus
+  // remisiones a CONFIRMADA para poder refacturarlas.
+  async function descartar() {
+    if (!toDescartar) return;
+    setActBusy(true);
+    try {
+      await apiFetch(`/api/v1/facturas/${toDescartar.id}`, { method: "DELETE" });
+      toast.success(`Borrador ${toDescartar.serie}${toDescartar.folio} descartado (remisiones liberadas)`);
+      invalidar(toDescartar.id);
+      setToDescartar(null); reload();
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudo descartar");
+    } finally { setActBusy(false); }
+  }
   async function descargar(f: Factura, tipo: "pdf" | "xml") {
     try { await apiDownload(`/api/v1/facturas/${f.id}/${tipo}`, `${f.serie}${f.folio}.${tipo}`); }
     catch (e) { toast.error(e instanceof ApiError ? e.message : "No se pudo descargar"); }
@@ -260,6 +275,8 @@ export default function FacturasPage() {
       onClick: (f) => abrirEnviar(f), hidden: (f) => !(canWrite && f.estado === "TIMBRADA") },
     { id: "cancelar", label: "Cancelar", icon: <X size={15} />, tone: "danger",
       onClick: (f) => abrirCancelar(f), hidden: (f) => !(canWrite && f.estado === "TIMBRADA") },
+    { id: "descartar", label: "Descartar borrador", icon: <Trash2 size={15} />, tone: "danger",
+      onClick: (f) => setToDescartar(f), hidden: (f) => !(canWrite && f.estado === "BORRADOR") },
   ];
 
   return (
@@ -332,6 +349,12 @@ export default function FacturasPage() {
         }
         confirmLabel="Facturar" confirmVariant="success"
         onConfirm={timbrar} onClose={() => setToTimbrar(null)} loading={actBusy} />
+      <ConfirmDialog
+        open={toDescartar !== null}
+        title={`Descartar borrador ${toDescartar?.serie ?? ""}${toDescartar?.folio ?? ""}`}
+        message={`¿Descartar el borrador ${toDescartar?.serie ?? ""}${toDescartar?.folio ?? ""}? Se elimina la factura y sus remisiones vuelven a CONFIRMADA para poder refacturarlas. No aplica a facturas timbradas.`}
+        confirmLabel="Descartar" confirmVariant="danger"
+        onConfirm={descartar} onClose={() => setToDescartar(null)} loading={actBusy} />
       <Modal
         open={toCancel !== null}
         onClose={() => setToCancel(null)}
