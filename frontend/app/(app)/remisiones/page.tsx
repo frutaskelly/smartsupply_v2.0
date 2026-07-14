@@ -459,20 +459,13 @@ export default function RemisionesPage() {
       // se crea — así un segundo clic/disparo no genera una remisión duplicada.
       const rem = await post<RemisionDetail>("/api/v1/remisiones", payload);
       if (confirmar) {
-        try {
-          await post(`/api/v1/remisiones/${rem.id}/confirmar`, {});
-          toast.success(`Remisión ${rem.folio_interno} confirmada (inventario reservado)`);
-        } catch (e) {
-          // Sin existencia: la remisión ya quedó como borrador; ofrecemos sobregiro.
-          if (e instanceof ApiError && /existencia insuficiente/i.test(e.message)) {
-            setNegStock({ remId: rem.id, folio: rem.folio_interno });
-            return;
-          }
-          throw e;
-        }
-      } else {
-        toast.success(`Remisión ${rem.folio_interno} guardada (borrador)`);
+        // Mismo flujo que el ícono Confirmar de la tabla: reserva inventario y,
+        // si falta existencia, abre el popup de sobregiro. Al confirmar regresa
+        // al listado; si abre el popup, se queda para que el usuario decida.
+        await confirmarRemision(rem.id, rem.folio_interno, true);
+        return;
       }
+      toast.success(`Remisión ${rem.folio_interno} guardada (borrador)`);
       setMode("list");
       reload();
     } catch (e) {
@@ -545,20 +538,32 @@ export default function RemisionesPage() {
       </div>
     );
   }
-  async function confirmar() {
-    if (!toConfirm) return;
+  // Confirma una remisión existente (reserva inventario). Si falta existencia,
+  // abre el popup de sobregiro (inventario en negativo). Lógica ÚNICA que
+  // comparten el ícono Confirmar de la tabla y el botón Confirmar del alta.
+  // `volverALista`: al confirmar OK, regresa al listado (lo usa el alta).
+  async function confirmarRemision(remId: string, folio: string, volverALista = false): Promise<boolean> {
     try {
-      await post(`/api/v1/remisiones/${toConfirm.id}/confirmar`, {});
-      toast.success("Remisión confirmada (stock reservado)");
-      setToConfirm(null); reload();
+      await post(`/api/v1/remisiones/${remId}/confirmar`, {});
+      toast.success(`Remisión ${folio} confirmada (inventario reservado)`);
+      if (volverALista) setMode("list");
+      reload();
+      return true;
     } catch (e) {
+      // Sin existencia: la remisión queda en BORRADOR; ofrecemos sobregiro.
       if (e instanceof ApiError && /existencia insuficiente/i.test(e.message)) {
-        setNegStock({ remId: toConfirm.id, folio: toConfirm.folio_interno });
-        setToConfirm(null);
-        return;
+        setNegStock({ remId, folio });
+        return false;
       }
       toast.error(e instanceof ApiError ? e.message : "No se pudo confirmar");
+      return false;
     }
+  }
+  async function confirmar() {
+    if (!toConfirm) return;
+    const r = toConfirm;
+    setToConfirm(null);
+    await confirmarRemision(r.id, r.folio_interno);
   }
   // Reintenta la confirmación autorizando el sobregiro (inventario negativo).
   async function confirmarNegativo() {
