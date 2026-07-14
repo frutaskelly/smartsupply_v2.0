@@ -157,9 +157,11 @@ def test_cancel_motivo_02_libera_para_refacturar(client, env, auth, fake_pac):
     assert r.status_code == 200, r.text
     # inventario NO cambia (la mercancía sigue saliendo, se refactura)
     assert _disponible(env) == (Decimal("70"), Decimal("30"))
-    # remisión liberada (factura_id NULL) y sigue CONFIRMADA → refacturable
+    # remisión vuelve a CONFIRMADA y refacturable (su factura quedó CANCELADA;
+    # factura_id se conserva para mostrarla en la columna "Factura")
     det = client.get(f"/api/v1/remisiones/{rem_id}", headers=_h(env)).json()
     assert det["estado"] == "CONFIRMADA"
+    assert det["factura_estado"] == "CANCELADA"
     refac = client.post("/api/v1/facturas/desde-remisiones", headers=_h(env),
                         json={"remision_ids": [rem_id]})
     assert refac.status_code == 201, refac.text

@@ -58,7 +58,9 @@ export default function FacturasPage() {
   useEffect(() => {
     if (!genCliente) { setRemisiones([]); setSel({}); return; }
     apiFetch<Page<Remision>>(`/api/v1/remisiones?cliente_id=${genCliente}&limit=200`)
-      .then((r) => setRemisiones(r.items.filter((x) => !x.factura_id && (x.estado === "BORRADOR" || x.estado === "CONFIRMADA"))))
+      .then((r) => setRemisiones(r.items.filter(
+        (x) => (x.estado === "BORRADOR" || x.estado === "CONFIRMADA") &&
+          (!x.factura_id || x.factura_estado === "CANCELADA"))))
       .catch(() => setRemisiones([]));
     setSel({});
   }, [genCliente]);

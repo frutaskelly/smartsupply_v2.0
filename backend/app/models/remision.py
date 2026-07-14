@@ -22,6 +22,8 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
+from typing import Optional
+
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
@@ -68,6 +70,19 @@ class Remision(Base, TimestampMixin, SoftDeleteMixin):
         back_populates="remision",
         order_by="LineaRemision.numero_linea",
     )
+    # `factura_id` apunta a la ÚLTIMA factura de la remisión y NO se anula al
+    # cancelarla (para poder mostrar su folio/estado en la lista). La
+    # refacturabilidad se deriva del estado de esa factura (CANCELADA → libre).
+    factura = relationship("Factura", foreign_keys=[factura_id])
+
+    @property
+    def factura_folio(self) -> Optional[str]:
+        f = self.factura
+        return f"{f.serie or ''}{f.folio}" if f else None
+
+    @property
+    def factura_estado(self) -> Optional[str]:
+        return self.factura.estado if self.factura else None
 
 
 class LineaRemision(Base):

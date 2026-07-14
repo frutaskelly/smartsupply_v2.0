@@ -65,6 +65,7 @@ type Empresa = {
   regimen_fiscal_sat: string;
   domicilio_fiscal_cp: string;
   domicilio_fiscal: Record<string, unknown>;
+  has_logo: boolean;
 };
 
 type Csd = {
@@ -140,6 +141,27 @@ export default function EmpresaPage() {
   const [csdPassword, setCsdPassword] = useState("");
   const [uploading, setUploading] = useState(false);
 
+  // Logo del emisor (para el PDF de las facturas). Se previsualiza vía fetch
+  // autenticado → object URL (el endpoint requiere Bearer, un <img src> no basta).
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [logoUploading, setLogoUploading] = useState(false);
+
+  async function loadLogo() {
+    try {
+      const supabase = getSupabase();
+      const { data: { session } } = await supabase.auth.getSession();
+      const headers = new Headers();
+      if (session?.access_token) headers.set("Authorization", `Bearer ${session.access_token}`);
+      const res = await fetch(`${API_URL}/api/v1/empresa/logo`, { headers });
+      if (!res.ok) { setLogoUrl((u) => { if (u) URL.revokeObjectURL(u); return null; }); return; }
+      const blob = await res.blob();
+      setLogoUrl((prev) => { if (prev) URL.revokeObjectURL(prev); return URL.createObjectURL(blob); });
+    } catch {
+      setLogoUrl(null);
+    }
+  }
+
   function loadCsds() {
     apiFetch<Csd[]>("/api/v1/empresa/csd")
       .then((list) => setCsds(Array.isArray(list) ? list : []))
@@ -169,6 +191,7 @@ export default function EmpresaPage() {
       })
       .finally(() => setLoading(false));
     loadCsds();
+    loadLogo();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -291,6 +314,52 @@ export default function EmpresaPage() {
       toast.error(e instanceof ApiError ? e.message : "No se pudo subir el CSD");
     } finally {
       setUploading(false);
+    }
+  }
+
+  async function subirLogo() {
+    if (!logoFile) {
+      toast.error("Selecciona una imagen (PNG, JPG o WebP)");
+      return;
+    }
+    setLogoUploading(true);
+    try {
+      const supabase = getSupabase();
+      const { data: { session } } = await supabase.auth.getSession();
+      const fd = new FormData();
+      fd.append("logo", logoFile);
+      const headers = new Headers();
+      if (session?.access_token) headers.set("Authorization", `Bearer ${session.access_token}`);
+      const res = await fetch(`${API_URL}/api/v1/empresa/logo`, { method: "POST", headers, body: fd });
+      if (!res.ok) {
+        let detail = res.statusText;
+        try {
+          detail = (await res.json()).detail ?? detail;
+        } catch {
+          /* cuerpo no-JSON */
+        }
+        throw new ApiError(res.status, detail);
+      }
+      toast.success("Logo actualizado");
+      setLogoFile(null);
+      loadLogo();
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudo subir el logo");
+    } finally {
+      setLogoUploading(false);
+    }
+  }
+
+  async function quitarLogo() {
+    setLogoUploading(true);
+    try {
+      await apiFetch("/api/v1/empresa/logo", { method: "DELETE" });
+      toast.success("Logo eliminado");
+      setLogoUrl((u) => { if (u) URL.revokeObjectURL(u); return null; });
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudo eliminar el logo");
+    } finally {
+      setLogoUploading(false);
     }
   }
 
@@ -506,6 +575,44 @@ export default function EmpresaPage() {
               </table>
             )}
           </div>
+        </div>
+      </Card>
+
+      <Card title="Logo de la empresa" subtitle="Aparece en la representación impresa de tus facturas (arriba a la derecha)">
+        <div className="space-y-4">
+          <p className="text-sm text-muted">
+            Sube tu logo en PNG, JPG o WebP (máx. 2 MB). Se mostrará en el PDF de las facturas.
+          </p>
+
+          {logoUrl && (
+            <div className="flex items-center gap-4">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={logoUrl} alt="Logo de la empresa" className="max-h-20 rounded border border-border bg-white p-2" />
+              {canWrite && (
+                <Button variant="secondary" onClick={quitarLogo} disabled={logoUploading}>
+                  Quitar logo
+                </Button>
+              )}
+            </div>
+          )}
+
+          {canWrite && (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Field label="Imagen del logo">
+                <Input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  onChange={(e) => setLogoFile(e.target.files?.[0] ?? null)}
+                  disabled={logoUploading}
+                />
+              </Field>
+              <div className="flex items-end">
+                <Button onClick={subirLogo} disabled={logoUploading || !logoFile}>
+                  <Upload size={16} /> {logoUploading ? "Subiendo…" : "Subir logo"}
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       </Card>
 

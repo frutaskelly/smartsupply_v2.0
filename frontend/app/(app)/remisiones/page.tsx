@@ -37,6 +37,22 @@ const ESTADO_TONE: Record<string, "success" | "warning" | "muted" | "danger" | "
   CANCELADA: "danger",
 };
 
+// Tono del estado de la FACTURA vinculada (columna "Factura" de la lista).
+const FACTURA_TONE: Record<string, "success" | "warning" | "danger"> = {
+  BORRADOR: "warning",
+  TIMBRADA: "success",
+  CANCELADA: "danger",
+};
+
+// Facturable: borrador/confirmada y sin factura vigente (sin factura o con la
+// última CANCELADA → refacturación).
+function puedeFacturar(r: Remision): boolean {
+  return (
+    (r.estado === "BORRADOR" || r.estado === "CONFIRMADA") &&
+    (!r.factura_id || r.factura_estado === "CANCELADA")
+  );
+}
+
 type LineaForm = {
   key: string;
   texto: string;            // lo que se mostró/pegó (para aprender alias / revisar)
@@ -835,7 +851,7 @@ export default function RemisionesPage() {
 
   // Solo elegibles: BORRADOR o CONFIRMADA sin factura previa. El resto se omite.
   async function bulkFacturar(modo: "sumar" | "sin_sumar" | "separado") {
-    const elegibles = selected.filter((r) => (r.estado === "BORRADOR" || r.estado === "CONFIRMADA") && !r.factura_id);
+    const elegibles = selected.filter(puedeFacturar);
     const omitidas = selected.length - elegibles.length;
     if (elegibles.length === 0) {
       toast.error(`Ninguna remisión elegible (se omitieron ${omitidas} canceladas o ya facturadas)`);
@@ -896,6 +912,22 @@ export default function RemisionesPage() {
 
   const columns: Column<Remision>[] = [
     { header: "Folio", sortable: true, sortValue: (r) => r.folio_interno, cell: (r) => <span className="font-medium">{r.folio_interno}</span> },
+    {
+      header: "Factura",
+      sortable: true,
+      sortValue: (r) => r.factura_folio ?? "",
+      cell: (r) =>
+        r.factura_folio ? (
+          <span className="inline-flex items-center gap-1.5">
+            <span className="font-medium">{r.factura_folio}</span>
+            {r.factura_estado && (
+              <Badge tone={FACTURA_TONE[r.factura_estado] ?? "muted"}>{r.factura_estado}</Badge>
+            )}
+          </span>
+        ) : (
+          <span className="text-muted">—</span>
+        ),
+    },
     { header: "Cliente", sortable: true, sortValue: (r) => cliName[r.cliente_facturacion_id] ?? "", cell: (r) => cliName[r.cliente_facturacion_id] ?? "—" },
     { header: "Fecha", sortable: true, sortValue: (r) => r.fecha_remision, cell: (r) => fmtDate(r.fecha_remision) },
     { header: "Estado", sortable: true, sortValue: (r) => r.estado, cell: (r) => <Badge tone={ESTADO_TONE[r.estado] ?? "muted"}>{r.estado}</Badge> },
@@ -1088,7 +1120,7 @@ export default function RemisionesPage() {
   // Remisiones elegibles a facturar dentro de la selección y sus clientes distintos.
   // Una sola factura solo es válida con un único cliente: si hay varios, esas
   // opciones se deshabilitan en el popup (solo queda "Separado").
-  const facturarElegibles = selected.filter((r) => (r.estado === "BORRADOR" || r.estado === "CONFIRMADA") && !r.factura_id);
+  const facturarElegibles = selected.filter(puedeFacturar);
   const clientesElegibles = [...new Set(facturarElegibles.map((r) => r.cliente_facturacion_id))];
   const multiCliente = clientesElegibles.length > 1;
   // Borradores (confirmables) y no-canceladas (cancelables) dentro de la selección.

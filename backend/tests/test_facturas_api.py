@@ -3,6 +3,7 @@
 El motor (calcular_linea/totales) se prueba puro; la generación desde remisión
 prueba el cruce, los totales, el marcado de remisión facturada y los guards.
 """
+import base64
 import uuid
 from decimal import Decimal
 
@@ -225,3 +226,53 @@ def test_tomador_cannot_invoice(client, env, auth_as):
     assert client.get("/api/v1/facturas", headers=h).status_code == 403
     assert client.post("/api/v1/facturas/desde-remisiones", headers=h,
                        json={"remision_ids": [str(uuid.uuid4())]}).status_code == 403
+
+
+def test_remision_expone_factura_en_lista(client, env, auth_as):
+    """Tras facturar, la remisión expone el folio y estado de su factura (columna)."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    rem_id = _remision_confirmada(client, h, env, qty="2", precio="20")
+    fac = client.post("/api/v1/facturas/desde-remisiones", headers=h, json={"remision_ids": [rem_id]}).json()
+    lista = client.get("/api/v1/remisiones?limit=200", headers=h).json()["items"]
+    row = next(x for x in lista if x["id"] == rem_id)
+    assert row["factura_folio"] == f"{fac['serie']}{fac['folio']}"
+    assert row["factura_estado"] == "BORRADOR"
+
+
+def test_pdf_propio_es_pdf(client, env, auth_as):
+    """El PDF de la factura lo genera la app (reportlab): responde un %PDF válido."""
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    rem_id = _remision_confirmada(client, h, env, qty="3", precio="20")
+    fac = client.post("/api/v1/facturas/desde-remisiones", headers=h, json={"remision_ids": [rem_id]}).json()
+    r = client.get(f"/api/v1/facturas/{fac['id']}/pdf", headers=h)
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"] == "application/pdf"
+    assert r.content[:5] == b"%PDF-"
+
+
+# PNG 1x1 transparente, para probar el ciclo del logo.
+_PNG_1x1 = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
+)
+
+
+def test_empresa_logo_ciclo(client, env, auth_as):
+    auth_as(env["admin"]); h = _hdr(env["admin"])
+    assert client.get("/api/v1/empresa", headers=h).json()["has_logo"] is False
+
+    up = client.post("/api/v1/empresa/logo", headers=h,
+                     files={"logo": ("logo.png", _PNG_1x1, "image/png")})
+    assert up.status_code == 200, up.text
+    assert up.json()["has_logo"] is True
+
+    got = client.get("/api/v1/empresa/logo", headers=h)
+    assert got.status_code == 200 and got.headers["content-type"] == "image/png"
+    assert got.content == _PNG_1x1
+
+    bad = client.post("/api/v1/empresa/logo", headers=h,
+                      files={"logo": ("x.txt", b"hola", "text/plain")})
+    assert bad.status_code == 422
+
+    dele = client.delete("/api/v1/empresa/logo", headers=h)
+    assert dele.status_code == 200 and dele.json()["has_logo"] is False
+    assert client.get("/api/v1/empresa/logo", headers=h).status_code == 404
