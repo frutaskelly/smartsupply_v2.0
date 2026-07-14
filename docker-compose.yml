@@ -9,7 +9,7 @@ services:
   # ─── PostgreSQL (local dev DB; cloud = Supabase) ───────────────────────────
   postgres:
     image: postgres:17-alpine
-    container_name: smartsupplyv2_postgres
+    restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -30,7 +30,7 @@ services:
   # ─── Redis (cache / rate-limit / pub-sub for POS realtime) ─────────────────
   redis:
     image: redis:7-alpine
-    container_name: smartsupplyv2_redis
+    restart: unless-stopped
     ports:
       - "6380:6379"
     volumes:
@@ -48,7 +48,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: smartsupplyv2_backend
+    restart: unless-stopped
     env_file:
       - .env
     environment:
@@ -79,7 +79,7 @@ services:
         NEXT_PUBLIC_API_URL: http://localhost:8011
         NEXT_PUBLIC_SUPABASE_URL: https://qwffsaxoeehwwdzaytqb.supabase.co
         NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_tgJ_GhSa9ZtHvysc-HPH1g_4V1bjKDb
-    container_name: smartsupplyv2_frontend
+    restart: unless-stopped
     environment:
       NODE_ENV: production
     ports:
