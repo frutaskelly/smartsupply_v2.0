@@ -24,6 +24,7 @@ from ...core.rbac import AuthContext, get_tenant_db, require_permission
 from ...models import (
     Almacen,
     Cliente,
+    Factura,
     LineaRemision,
     ListaPrecios,
     LoteInventario,
@@ -235,6 +236,42 @@ def get_remision(
     return rem
 
 
+def _liberar_reservas(db: Session, ctx: AuthContext, rem: Remision, *, motivo: str) -> None:
+    """Devuelve al inventario lo reservado por las líneas de una remisión
+    CONFIRMADA (reservada → disponible) y registra un movimiento por línea.
+    Lo usan cancelar y la reedición de una confirmada (que luego re-reserva)."""
+    prod_ids = {ln.producto_id for ln in rem.lineas if ln.lote_id is not None}
+    productos = {p.id: p for p in db.query(Producto).filter(Producto.id.in_(prod_ids)).all()}
+    for ln in rem.lineas:
+        if ln.lote_id is None:
+            continue
+        lote = (
+            db.query(LoteInventario)
+            .filter(LoteInventario.id == ln.lote_id)
+            .with_for_update()
+            .one_or_none()
+        )
+        if lote is None:
+            continue
+        # Libera exactamente lo reservado al confirmar (unidad base guardada);
+        # para filas antiguas sin cantidad_surtida, usa la estimación.
+        if ln.cantidad_surtida is not None:
+            cantidad = ln.cantidad_surtida
+        else:
+            factor = presentacion_factor(productos.get(ln.producto_id), ln.presentacion)
+            cantidad = ln.cantidad_solicitada * factor
+        lote.cantidad_reservada = max(_ZERO, lote.cantidad_reservada - cantidad)
+        lote.cantidad_disponible = lote.cantidad_disponible + cantidad
+        db.add(build_movimiento(
+            ctx.tenant_id, ctx.user_id, lote, "CANCELACION_REMISION", cantidad,
+            ref_tipo="REMISION", ref_id=rem.id, motivo=motivo,
+        ))
+        # Limpia el vínculo de reserva: la línea ya no reserva nada. Evita
+        # reservas huérfanas y cualquier doble-liberación futura.
+        ln.lote_id = None
+        ln.cantidad_surtida = None
+
+
 @router.patch("/{rem_id}", response_model=RemisionDetailOut)
 def update_remision(
     rem_id: UUID,
@@ -243,10 +280,23 @@ def update_remision(
     ctx: AuthContext = Depends(require_permission(_WRITE)),
 ):
     rem = get_or_404(db, Remision, rem_id)
-    if rem.estado != "BORRADOR":
-        raise HTTPException(status_code=409, detail="Solo se puede editar una remisión en BORRADOR")
+    if rem.estado not in ("BORRADOR", "CONFIRMADA"):
+        raise HTTPException(status_code=409, detail="Solo se puede editar una remisión en borrador o confirmada")
+    # No editar por detrás de una factura viva: si la remisión está ligada a una
+    # factura BORRADOR o TIMBRADA, editarla desincronizaría el comprobante ya
+    # emitido. Solo se edita si no tiene factura o si la última fue CANCELADA.
+    if rem.factura_id is not None:
+        fac = db.query(Factura).filter(Factura.id == rem.factura_id).one_or_none()
+        if fac is not None and fac.estado != "CANCELADA":
+            raise HTTPException(
+                status_code=409,
+                detail="La remisión está ligada a una factura; cancélala o descártala antes de editar",
+            )
+    era_confirmada = rem.estado == "CONFIRMADA"
+    almacen_anterior = rem.almacen_id           # para detectar cambio de almacén
     data = payload.model_dump(exclude_unset=True)
     lineas_in = data.pop("lineas", None)
+    almacen_cambio = "almacen_id" in data and data["almacen_id"] != almacen_anterior
 
     if data.get("almacen_id") is not None:
         ensure_fk(db, Almacen, data["almacen_id"], "almacen_id")
@@ -271,6 +321,31 @@ def update_remision(
             raise HTTPException(status_code=422, detail="La remisión debe tener al menos una línea")
         for ln in lineas_in:
             ensure_fk(db, Producto, ln["producto_id"], "producto_id")
+
+        # ¿Cambió el detalle que AFECTA inventario (producto, presentación,
+        # cantidad)? Si no, no se toca el inventario: se preserva la reserva
+        # existente y solo se actualizan precios/notas. Esto evita retiros/
+        # reservas no deseados al editar una CONFIRMADA sin mover cantidades.
+        def _firma(pid, pres, cant) -> tuple:
+            return (str(pid), str(pres), Decimal(str(cant)))
+        firma_actual = sorted(_firma(l.producto_id, l.presentacion, l.cantidad_solicitada) for l in rem.lineas)
+        firma_nueva = sorted(_firma(ln["producto_id"], ln["presentacion"], ln["cantidad_solicitada"]) for ln in lineas_in)
+        # Cambió el inventario si cambian productos/cantidades O el almacén (la
+        # reserva vive en un lote de un almacén concreto; mover almacén = re-reservar).
+        inv_cambio = firma_actual != firma_nueva or almacen_cambio
+
+        # Confirmada + cambio real de inventario → libera la reserva previa
+        # (más abajo se re-reserva con las líneas nuevas). Si no cambia, indexa
+        # la reserva por firma para heredarla en las líneas reconstruidas.
+        reserva_por_firma: dict[tuple, list] = {}
+        if era_confirmada and inv_cambio:
+            _liberar_reservas(db, ctx, rem, motivo=f"Reedición remisión {rem.folio_interno} (libera reserva previa)")
+        elif era_confirmada:
+            for l in rem.lineas:
+                reserva_por_firma.setdefault(
+                    _firma(l.producto_id, l.presentacion, l.cantidad_solicitada), []
+                ).append((l.lote_id, l.cantidad_surtida))
+
         for old in list(rem.lineas):
             db.delete(old)
         db.flush()
@@ -291,13 +366,25 @@ def update_remision(
                 precio = res["precio"]
             importe = ln["cantidad_solicitada"] * precio
             subtotal += importe
-            db.add(LineaRemision(
+            nueva = LineaRemision(
                 tenant_id=ctx.tenant_id, remision_id=rem.id, numero_linea=i,
                 producto_id=ln["producto_id"], presentacion=ln["presentacion"],
                 cantidad_solicitada=ln["cantidad_solicitada"], precio_unitario=precio,
                 importe=importe, notas=ln.get("notas"),
-            ))
+            )
+            # Inventario sin cambios: hereda la reserva de la línea equivalente.
+            if era_confirmada and not inv_cambio:
+                heredadas = reserva_por_firma.get(_firma(ln["producto_id"], ln["presentacion"], ln["cantidad_solicitada"]))
+                if heredadas:
+                    nueva.lote_id, nueva.cantidad_surtida = heredadas.pop()
+            db.add(nueva)
         rem.subtotal = subtotal
+        # Reedición de una CONFIRMADA con cambio de inventario: re-reserva con
+        # las líneas nuevas (queda CONFIRMADA). Sin existencia → 422 y revierte.
+        if era_confirmada and inv_cambio:
+            db.flush()
+            db.refresh(rem)                          # recarga rem.lineas con las nuevas
+            reservar_stock_remision(db, ctx, rem)
 
     rem.total = (rem.subtotal or _ZERO) - (rem.descuento or _ZERO) + (rem.iva or _ZERO) + (rem.ieps or _ZERO)
     rem.updated_by = ctx.user_id
@@ -395,32 +482,7 @@ def cancelar_remision(
         )
 
     if rem.estado == "CONFIRMADA":
-        prod_ids = {ln.producto_id for ln in rem.lineas if ln.lote_id is not None}
-        productos = {p.id: p for p in db.query(Producto).filter(Producto.id.in_(prod_ids)).all()}
-        for ln in rem.lineas:
-            if ln.lote_id is None:
-                continue
-            lote = (
-                db.query(LoteInventario)
-                .filter(LoteInventario.id == ln.lote_id)
-                .with_for_update()
-                .one_or_none()
-            )
-            if lote is None:
-                continue
-            # release exactly what was reserved at confirm (stored base units);
-            # fall back to the estimate for legacy rows without cantidad_surtida.
-            if ln.cantidad_surtida is not None:
-                cantidad = ln.cantidad_surtida
-            else:
-                factor = presentacion_factor(productos.get(ln.producto_id), ln.presentacion)
-                cantidad = ln.cantidad_solicitada * factor
-            lote.cantidad_reservada = max(_ZERO, lote.cantidad_reservada - cantidad)
-            lote.cantidad_disponible = lote.cantidad_disponible + cantidad
-            db.add(build_movimiento(
-                ctx.tenant_id, ctx.user_id, lote, "CANCELACION_REMISION", cantidad,
-                ref_tipo="REMISION", ref_id=rem.id, motivo=f"Cancelación remisión {rem.folio_interno}",
-            ))
+        _liberar_reservas(db, ctx, rem, motivo=f"Cancelación remisión {rem.folio_interno}")
 
     rem.estado = "CANCELADA"
     rem.updated_by = ctx.user_id

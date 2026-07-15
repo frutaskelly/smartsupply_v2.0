@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 from ...core.config import settings
 from ...core.rbac import AuthContext, get_tenant_db, require_permission
 from ...models import (
+    Almacen,
     Cliente,
     EsquemaImpuesto,
     Factura,
@@ -47,9 +48,9 @@ from ...services.factura_pdf import build_factura_pdf
 from ...services.facturama import FacturamaClient, FacturamaError
 from ...services.fiscal import calcular_linea, totales
 from ...services.onboarding import compute_status
-from ...services.inventario import build_movimiento, presentacion_factor, presentacion_sat
+from ...services.inventario import build_movimiento, presentacion_factor, presentacion_sat, resolve_lote
 from ...services.series import consumir_folio, resolver_serie, siguiente_folio
-from ._helpers import get_or_404, paginate
+from ._helpers import ensure_fk, get_or_404, paginate
 from .remisiones import reservar_stock_remision
 
 router = APIRouter(prefix="/facturas", tags=["facturas"])
@@ -121,6 +122,10 @@ def _release_remision_stock(db: Session, rems, ctx, factura) -> None:
                 ref_tipo="FACTURA", ref_id=factura.id,
                 motivo=f"Cancelación factura {factura.serie}{factura.folio}",
             ))
+            # La reserva quedó liberada: limpia el vínculo para evitar reservas
+            # huérfanas y dobles liberaciones (al refacturar se vuelve a estampar).
+            ln.lote_id = None
+            ln.cantidad_surtida = None
 
 
 def _writeoff_remision_stock(db: Session, rems, ctx, factura) -> None:
@@ -159,6 +164,61 @@ def _writeoff_remision_stock(db: Session, rems, ctx, factura) -> None:
                 ctx.tenant_id, ctx.user_id, lote, "MERMA", -cantidad,
                 ref_tipo="FACTURA", ref_id=factura.id, motivo=desc,
             ))
+            # La reserva quedó consumida como merma: limpia el vínculo.
+            ln.lote_id = None
+            ln.cantidad_surtida = None
+
+
+def _descontar_factura_directa(db: Session, ctx, factura) -> None:
+    """Al timbrar una factura DIRECTA: descuenta de `disponible` la cantidad base
+    de cada línea, del almacén de la factura (permite negativo: sobregiro), y
+    estampa el lote en la línea para poder revertir al cancelar."""
+    if factura.almacen_id is None:      # facturas desde remisiones no aplican
+        return
+    lineas = db.query(LineaFactura).filter(LineaFactura.factura_id == factura.id).all()
+    for ln in lineas:
+        base = Decimal(ln.cantidad_base) if ln.cantidad_base is not None else Decimal(ln.cantidad)
+        lote = resolve_lote(
+            db, ctx.tenant_id, ln.producto_id, factura.almacen_id,
+            numero_lote=None, create=True,   # sobregiro: crea el lote si no existe
+        )
+        if lote is None:
+            continue
+        lote.cantidad_disponible = lote.cantidad_disponible - base
+        ln.lote_id = lote.id
+        db.add(build_movimiento(
+            ctx.tenant_id, ctx.user_id, lote, "CONFIRMACION_FACTURA", -base,
+            ref_tipo="FACTURA", ref_id=factura.id,
+            motivo=f"Salida factura {factura.serie}{factura.folio}",
+        ))
+
+
+def _revertir_factura_directa(db: Session, ctx, factura, *, perdida: bool) -> None:
+    """Al cancelar una factura DIRECTA timbrada: devolución → regresa a
+    `disponible` (ENTRADA_DEVOLUCION); pérdida → la mercancía no regresa (ya salió
+    al timbrar), solo se suelta el vínculo. Limpia el lote de cada línea."""
+    if factura.almacen_id is None:
+        return
+    lineas = db.query(LineaFactura).filter(LineaFactura.factura_id == factura.id).all()
+    for ln in lineas:
+        if ln.lote_id is None:          # no se timbró / ya revertida
+            continue
+        base = Decimal(ln.cantidad_base) if ln.cantidad_base is not None else Decimal(ln.cantidad)
+        if not perdida:
+            lote = (
+                db.query(LoteInventario)
+                .filter(LoteInventario.id == ln.lote_id)
+                .with_for_update()
+                .one_or_none()
+            )
+            if lote is not None:
+                lote.cantidad_disponible = lote.cantidad_disponible + base
+                db.add(build_movimiento(
+                    ctx.tenant_id, ctx.user_id, lote, "ENTRADA_DEVOLUCION", base,
+                    ref_tipo="FACTURA", ref_id=factura.id,
+                    motivo=f"Cancelación factura {factura.serie}{factura.folio}",
+                ))
+        ln.lote_id = None               # pérdida: los bienes ya salieron al timbrar
 
 
 @router.get("", response_model=Page[FacturaOut])
@@ -341,6 +401,7 @@ def factura_directa(
     Las líneas referencian productos del catálogo para tomar su clave SAT y su
     desglose fiscal."""
     cliente = get_or_404(db, Cliente, payload.cliente_id)
+    ensure_fk(db, Almacen, payload.almacen_id, "almacen_id")   # de dónde sale el stock
     tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
 
     prod_ids = {ln.producto_id for ln in payload.lineas}
@@ -369,6 +430,7 @@ def factura_directa(
         forma_pago=payload.forma_pago or cliente.forma_pago_default or "99",
         metodo_pago=payload.metodo_pago or cliente.metodo_pago_default or "PPD",
         lugar_expedicion=tenant.domicilio_fiscal_cp,
+        almacen_id=payload.almacen_id,
         notas=payload.notas, created_by=ctx.user_id, estado="BORRADOR",
     )
     db.add(factura); db.flush()
@@ -384,6 +446,8 @@ def factura_directa(
         # cuadra con el subtotal del comprobante y el PAC rechaza el timbrado.
         importe = (cantidad * valor_unitario).quantize(Decimal("0.01"))
         clave_unidad = presentacion_sat(prod, ln.presentacion) or (prod.unidad_sat if prod else "H87")
+        # Cantidad en unidad base (para descontar inventario al timbrar).
+        cantidad_base = cantidad * presentacion_factor(prod, ln.presentacion)
         calc = _fiscal_calc(prod, esq, importe, cantidad)
         calc_lineas.append(calc)
         db.add(LineaFactura(
@@ -391,7 +455,8 @@ def factura_directa(
             producto_id=ln.producto_id,
             clave_prod_serv=(prod.clave_sat if prod else "01010101"),
             clave_unidad=clave_unidad, descripcion=(prod.nombre if prod else "Producto"),
-            cantidad=cantidad, valor_unitario=valor_unitario, importe=importe, objeto_imp="02",
+            cantidad=cantidad, cantidad_base=cantidad_base,
+            valor_unitario=valor_unitario, importe=importe, objeto_imp="02",
             iva_tasa=calc["iva_tasa"], iva_importe=calc["iva_importe"],
             ieps_tipo=calc["ieps_tipo"], ieps_valor=calc["ieps_valor"], ieps_importe=calc["ieps_importe"],
             ret_iva_importe=calc["ret_iva_importe"], ret_isr_importe=calc["ret_isr_importe"],
@@ -458,6 +523,9 @@ def timbrar_factura(
     factura.uuid = uuid_sat
     factura.estado = "TIMBRADA"
     factura.fecha_timbrado = func.now()
+    # Factura directa: al timbrar sale el inventario (las de remisión ya salieron
+    # al confirmar; almacen_id es None en esas y el helper no hace nada).
+    _descontar_factura_directa(db, ctx, factura)
     try:
         factura.xml = client.download_xml(factura.facturama_id).decode("utf-8", "ignore")
     except FacturamaError:
@@ -505,6 +573,9 @@ def cancelar_factura(
     factura.fecha_cancelacion = func.now()
     factura.motivo_cancelacion = payload.motivo
     factura.uuid_sustitucion = str(payload.uuid_sustitucion) if payload.uuid_sustitucion else None
+
+    # Factura directa (sin remisión): revierte el inventario que salió al timbrar.
+    _revertir_factura_directa(db, ctx, factura, perdida=(payload.inventario == "perdida"))
 
     rems = db.query(Remision).filter(Remision.factura_id == factura.id).all()
     # Qué hacer con el inventario reservado por las remisiones (elegido al cancelar):

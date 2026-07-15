@@ -158,6 +158,7 @@ export default function RemisionesPage() {
   // modo crear/editar. `editId` = remisión (BORRADOR) que se está editando; null = alta nueva.
   const [mode, setMode] = useState<"list" | "create">("list");
   const [editId, setEditId] = useState<string | null>(null);
+  const [editEstado, setEditEstado] = useState<string | null>(null);   // estado de la remisión editada
   const [clienteId, setClienteId] = useState("");
   const [sucursalId, setSucursalId] = useState("");
   const [almacenId, setAlmacenId] = useState("");
@@ -249,6 +250,7 @@ export default function RemisionesPage() {
 
   function openCreate() {
     setEditId(null);
+    setEditEstado(null);
     resetForm();
     setMode("create");
   }
@@ -256,7 +258,14 @@ export default function RemisionesPage() {
   // Abre esta misma pantalla para EDITAR una remisión en BORRADOR: carga sus
   // datos y líneas. Solo BORRADOR es editable (el backend lo exige).
   async function openEdit(r: Remision) {
-    if (r.estado !== "BORRADOR") { toast.error("Solo se puede editar una remisión en borrador"); return; }
+    if (r.estado !== "BORRADOR" && r.estado !== "CONFIRMADA") {
+      toast.error("Solo se puede editar una remisión en borrador o confirmada");
+      return;
+    }
+    if (r.factura_id && r.factura_estado !== "CANCELADA") {
+      toast.error("La remisión está ligada a una factura; cancélala o descártala antes de editar");
+      return;
+    }
     try {
       const det = await apiFetch<RemisionDetail>(`/api/v1/remisiones/${r.id}`);
       setClienteId(det.cliente_facturacion_id);
@@ -281,6 +290,7 @@ export default function RemisionesPage() {
       }));
       setStep(null);                              // no auto-abre el cliente al editar
       setEditId(r.id);
+      setEditEstado(r.estado);
       setMode("create");
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "No se pudo cargar la remisión");
@@ -657,12 +667,31 @@ export default function RemisionesPage() {
     };
   }
 
-  // "Guardar" del alta: valida y abre el diálogo de elección (Borrador vs
-  // Confirmar salida). No crea nada todavía.
+  // "Guardar": valida. Editando una CONFIRMADA guarda directo (PATCH re-reserva
+  // inventario y sigue confirmada); en alta/borrador abre el diálogo de elección.
   function abrirGuardar() {
     if (saving) return;
     if (!construirPayload()) return; // valida (togglea el toast si falta algo)
+    if (editId && editEstado === "CONFIRMADA") { void guardarEdicionConfirmada(); return; }
     setGuardarChoiceOpen(true);
+  }
+
+  // Guarda la edición de una remisión CONFIRMADA: el backend libera la reserva
+  // previa y re-reserva con las líneas nuevas (sigue CONFIRMADA, mismo folio).
+  async function guardarEdicionConfirmada() {
+    if (saving) return;
+    const payload = construirPayload();
+    if (!payload) return;
+    try {
+      const rem = await persistirRemision(payload);
+      toast.success(`Remisión ${rem.folio_interno} actualizada`);
+      setEditId(null); setEditEstado(null);
+      resetForm();
+      setMode("list");
+      reload();
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudo guardar la remisión");
+    }
   }
 
   // Opción "Borrador": crea la remisión en BORRADOR, sin afectar inventario.
@@ -1288,7 +1317,8 @@ export default function RemisionesPage() {
 
   const rowActions: RowAction<Remision>[] = [
     { id: "editar", label: "Editar", icon: <Pencil size={15} />, onClick: (r) => { void openEdit(r); },
-      hidden: (r) => !(canWrite && r.estado === "BORRADOR") },
+      hidden: (r) => !(canWrite && (r.estado === "BORRADOR" || r.estado === "CONFIRMADA")
+        && (!r.factura_id || r.factura_estado === "CANCELADA")) },
     { id: "confirmar", label: "Confirmar", icon: <Check size={15} />, tone: "success",
       onClick: (r) => setToConfirm(r), hidden: (r) => !(canWrite && r.estado === "BORRADOR") },
     { id: "cancelar", label: "Cancelar", icon: <X size={15} />, tone: "danger",
@@ -1304,8 +1334,10 @@ export default function RemisionesPage() {
       <div>
         <PageHeader
           title={editId ? "Editar remisión" : "Nueva remisión"}
-          subtitle="Borrador — al confirmar se reserva el inventario"
-          actions={<Button variant="secondary" onClick={() => { setEditId(null); setMode("list"); }}><X size={16} /> Cancelar</Button>}
+          subtitle={editEstado === "CONFIRMADA"
+            ? "Confirmada — al guardar se reajusta el inventario reservado"
+            : "Borrador — al confirmar se reserva el inventario"}
+          actions={<Button variant="secondary" onClick={() => { setEditId(null); setEditEstado(null); setMode("list"); }}><X size={16} /> Cancelar</Button>}
         />
 
         <div className="grid grid-cols-1 gap-4 rounded-xl border border-border p-4 sm:grid-cols-2 lg:grid-cols-3">

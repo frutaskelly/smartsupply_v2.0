@@ -38,6 +38,9 @@ class Factura(Base, TimestampMixin, SoftDeleteMixin):
     serie = Column(String(10), nullable=False, server_default="F")
     folio = Column(Integer, nullable=False)
     cliente_id = Column(UUID(as_uuid=True), ForeignKey("clientes.id", ondelete="RESTRICT"), nullable=False, index=True)
+    # Solo facturas DIRECTAS (sin remisión): almacén del que descuentan inventario
+    # al timbrar y al que regresan al cancelar. Null en facturas desde remisiones.
+    almacen_id = Column(UUID(as_uuid=True), ForeignKey("almacenes.id", ondelete="RESTRICT"), nullable=True, index=True)
 
     # ── CFDI 4.0 header ──
     uso_cfdi = Column(String(5), nullable=False, server_default="G03")
@@ -96,6 +99,10 @@ class LineaFactura(Base):
     clave_unidad = Column(String(3), nullable=False)
     descripcion = Column(String(1000), nullable=False)
     cantidad = Column(Numeric(18, 6), nullable=False)
+    # Factura directa: cantidad en unidad base y lote afectado, para descontar al
+    # timbrar y revertir al cancelar. Null en líneas de facturas desde remisiones.
+    cantidad_base = Column(Numeric(18, 4))
+    lote_id = Column(UUID(as_uuid=True), ForeignKey("lotes_inventario.id", ondelete="SET NULL"))
     valor_unitario = Column(Numeric(18, 6), nullable=False)
     importe = Column(Numeric(18, 4), nullable=False, server_default="0")
     descuento = Column(Numeric(18, 4), nullable=False, server_default="0")

@@ -49,8 +49,10 @@ class LineaFacturaDirectaIn(BaseModel):
 
 
 class FacturaDirectaIn(BaseModel):
-    """Factura capturada a mano: sin remisión y sin afectar inventario."""
+    """Factura capturada a mano (sin remisión). Descuenta inventario del almacén
+    indicado al timbrar y lo regresa al cancelar."""
     cliente_id: uuid.UUID
+    almacen_id: uuid.UUID                 # de dónde sale el inventario al timbrar
     serie_id: Optional[uuid.UUID] = None
     serie: Optional[str] = Field(default=None, max_length=10)
     uso_cfdi: Optional[str] = Field(default=None, max_length=5)
