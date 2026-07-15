@@ -19,14 +19,16 @@ from ...models import CategoriaProducto, EsquemaImpuesto, Producto
 from ...schemas.producto import (
     AliasIn,
     CandidatoOut,
+    LineaPegadaOut,
     MatchIn,
     MatchResultOut,
+    ParsePegadoIn,
     ProductoCreate,
     ProductoOut,
     ProductoUpdate,
 )
 from ...schemas.common import Page
-from ...services.producto_match import aprender_alias, buscar, sugerir_con_ia
+from ...services.producto_match import aprender_alias, buscar, parsear_pegado, sugerir_con_ia
 from ._helpers import ensure_fk, flush_or_conflict, get_or_404, paginate
 
 router = APIRouter(prefix="/productos", tags=["productos"])
@@ -129,6 +131,59 @@ def match_productos(
         if not cands:
             sin_match.append(texto)
 
+    if payload.usar_ia and sin_match:
+        ia = sugerir_con_ia(db, ctx.tenant_id, sin_match)
+        pids = {pid for pid in ia.values() if pid}
+        prods = {p.id: p for p in db.query(Producto).filter(Producto.id.in_(pids)).all()} if pids else {}
+        for r in resultados:
+            pid = ia.get(r["texto"])
+            if not r["candidatos"] and pid and pid in prods:
+                p = prods[pid]
+                r["candidatos"] = [CandidatoOut(
+                    producto_id=p.id, sku=p.sku, nombre=p.nombre, score=85, origen="ia",
+                    presentaciones=p.presentaciones or {}, presentacion_default=p.presentacion_default,
+                    unidad_base=p.unidad_base,
+                )]
+    return resultados
+
+
+@router.post("/parse-pegado", response_model=list[LineaPegadaOut])
+def parse_pegado(
+    payload: ParsePegadoIn,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """Convierte un bloque pegado desde Excel en líneas estructuradas (detecta
+    columnas en cualquier orden y salta el encabezado, con IA) y cruza cada
+    producto contra el catálogo (exacto → alias → difuso → IA). Declarado antes
+    de /{producto_id} para no capturarse como UUID."""
+    filas = parsear_pegado(payload.texto, usar_ia=payload.usar_ia)
+    if not filas:
+        return []
+
+    resultados: list[dict] = []
+    sin_match: list[str] = []
+    for f in filas:
+        # Varios candidatos para poblar el desplegable Match IA (el front muestra ≥80%).
+        cands = buscar(db, ctx.tenant_id, f["producto"], limit=8)
+        resultados.append({
+            "texto": f["producto"],
+            "cantidad": f["cantidad"],
+            "precio": f["precio"],
+            "presentacion": f["presentacion"],
+            "candidatos": [
+                CandidatoOut(
+                    producto_id=c.producto_id, sku=c.sku, nombre=c.nombre, score=c.score, origen=c.origen,
+                    presentaciones=c.presentaciones, presentacion_default=c.presentacion_default,
+                    unidad_base=c.unidad_base,
+                )
+                for c in cands
+            ],
+        })
+        if not cands:
+            sin_match.append(f["producto"])
+
+    # IA solo para los que ni exacto/alias/difuso resolvieron (sinónimos regionales).
     if payload.usar_ia and sin_match:
         ia = sugerir_con_ia(db, ctx.tenant_id, sin_match)
         pids = {pid for pid in ia.values() if pid}

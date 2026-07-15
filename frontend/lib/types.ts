@@ -290,6 +290,14 @@ export type Candidato = {
   unidad_base?: string | null;
 };
 export type MatchResult = { texto: string; candidatos: Candidato[] };
+// Línea parseada desde un pegado de Excel (backend detecta columnas + cruza).
+export type LineaPegada = {
+  texto: string;
+  cantidad: string;
+  precio: string;
+  presentacion: string;
+  candidatos: Candidato[];
+};
 
 
 export type Proveedor = {

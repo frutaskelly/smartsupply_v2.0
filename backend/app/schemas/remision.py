@@ -52,12 +52,19 @@ class RemisionCreate(BaseModel):
 
 
 class RemisionUpdate(BaseModel):
+    # Edición de una remisión en BORRADOR. Si se envían `lineas`, se reemplazan
+    # todas y se recalculan los totales. El folio NO cambia (la serie ya se
+    # consumió al crear), por eso no se acepta serie_id aquí.
+    cliente_facturacion_id: Optional[uuid.UUID] = None
+    sucursal_id: Optional[uuid.UUID] = None
     almacen_id: Optional[uuid.UUID] = None
     lista_precios_id: Optional[uuid.UUID] = None
+    fecha_remision: Optional[date] = None
     fecha_entrega: Optional[date] = None
     descuento: Optional[Decimal] = Field(default=None, ge=0)
     notas: Optional[str] = None
     nota_entrega: Optional[str] = None
+    lineas: Optional[list[LineaRemisionCreate]] = None
 
 
 class RemisionOut(ORMModel):

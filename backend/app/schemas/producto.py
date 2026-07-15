@@ -105,6 +105,19 @@ class MatchResultOut(BaseModel):
     candidatos: list[CandidatoOut]
 
 
+class ParsePegadoIn(BaseModel):
+    texto: str = Field(min_length=1, max_length=20000)
+    usar_ia: bool = True          # IA para detectar columnas fuera de orden / encabezados
+
+
+class LineaPegadaOut(BaseModel):
+    texto: str                    # producto tal como se pegó
+    cantidad: str
+    precio: str                   # '' si no venía
+    presentacion: str             # '' si no venía
+    candidatos: list[CandidatoOut]
+
+
 class AliasIn(BaseModel):
     texto: str = Field(min_length=1, max_length=254)
     producto_id: uuid.UUID

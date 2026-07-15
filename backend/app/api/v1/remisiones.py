@@ -246,14 +246,60 @@ def update_remision(
     if rem.estado != "BORRADOR":
         raise HTTPException(status_code=409, detail="Solo se puede editar una remisión en BORRADOR")
     data = payload.model_dump(exclude_unset=True)
-    if "almacen_id" in data:
+    lineas_in = data.pop("lineas", None)
+
+    if data.get("almacen_id") is not None:
         ensure_fk(db, Almacen, data["almacen_id"], "almacen_id")
-    if "lista_precios_id" in data:
+    if data.get("lista_precios_id") is not None:
         ensure_fk(db, ListaPrecios, data["lista_precios_id"], "lista_precios_id")
+    if data.get("cliente_facturacion_id") is not None:
+        ensure_fk(db, Cliente, data["cliente_facturacion_id"], "cliente_facturacion_id")
+
+    # Cliente/sucursal coherentes (la sucursal debe ser del cliente).
+    nuevo_cliente = data.get("cliente_facturacion_id", rem.cliente_facturacion_id)
+    if data.get("sucursal_id") is not None:
+        suc = get_or_404(db, Sucursal, data["sucursal_id"])
+        if suc.cliente_id != nuevo_cliente:
+            raise HTTPException(status_code=422, detail="La sucursal no pertenece al cliente de la remisión")
+
     for key, value in data.items():
         setattr(rem, key, value)
-    if "descuento" in data:
-        rem.total = rem.subtotal - rem.descuento + rem.iva + rem.ieps
+
+    # Reemplaza las líneas y recalcula el subtotal (mismo criterio que el alta).
+    if lineas_in is not None:
+        if not lineas_in:
+            raise HTTPException(status_code=422, detail="La remisión debe tener al menos una línea")
+        for ln in lineas_in:
+            ensure_fk(db, Producto, ln["producto_id"], "producto_id")
+        for old in list(rem.lineas):
+            db.delete(old)
+        db.flush()
+        subtotal = _ZERO
+        for i, ln in enumerate(lineas_in, start=1):
+            precio = ln.get("precio_unitario")
+            if precio is None:
+                res = resolver_precio(
+                    db, producto_id=ln["producto_id"], presentacion=ln["presentacion"],
+                    cantidad=ln["cantidad_solicitada"],
+                    cliente_id=rem.cliente_facturacion_id, sucursal_id=rem.sucursal_id,
+                )
+                if not res or res.get("precio") is None:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"No se encontró precio para el producto de la línea {i}; indícalo manualmente",
+                    )
+                precio = res["precio"]
+            importe = ln["cantidad_solicitada"] * precio
+            subtotal += importe
+            db.add(LineaRemision(
+                tenant_id=ctx.tenant_id, remision_id=rem.id, numero_linea=i,
+                producto_id=ln["producto_id"], presentacion=ln["presentacion"],
+                cantidad_solicitada=ln["cantidad_solicitada"], precio_unitario=precio,
+                importe=importe, notas=ln.get("notas"),
+            ))
+        rem.subtotal = subtotal
+
+    rem.total = (rem.subtotal or _ZERO) - (rem.descuento or _ZERO) + (rem.iva or _ZERO) + (rem.ieps or _ZERO)
     rem.updated_by = ctx.user_id
     db.flush()
     db.refresh(rem)
@@ -388,6 +434,13 @@ class EnviarRemisionIn(BaseModel):
     mensaje: Optional[str] = None
 
 
+class EnviarRemisionesLoteIn(BaseModel):
+    """Un solo correo con varias remisiones (todas del mismo cliente)."""
+    ids: list[UUID]
+    to: Optional[str] = None
+    mensaje: Optional[str] = None
+
+
 def _fmt_money(value: Decimal) -> str:
     return f"${value:,.2f}"
 
@@ -424,6 +477,55 @@ def _build_remision_html(rem: Remision, cliente_nombre: str, lineas: list) -> st
         + "</tbody></table>"
         f"<p style='margin:16px 0 0;text-align:right;font-size:16px'>"
         f"<strong>Total: {_fmt_money(total)}</strong></p>"
+        "</div>"
+    )
+
+
+def _build_remisiones_lote_html(
+    rems: list, cliente_nombre: str, mensaje: Optional[str], emisor_nombre: str
+) -> str:
+    """Cuerpo del correo cuando se envían VARIAS remisiones de un cliente en un
+    solo correo: saludo, mensaje opcional, un resumen (folio/fecha/total) y el
+    total general. El detalle de cada remisión va en su PDF adjunto."""
+    filas = []
+    total_general = _ZERO
+    for rem in rems:
+        subtotal = sum((ln.importe or _ZERO for ln in rem.lineas), _ZERO)
+        total_general += subtotal
+        filas.append(
+            "<tr>"
+            f"<td style='padding:6px 10px;border-bottom:1px solid #eee'>{rem.folio_interno}</td>"
+            f"<td style='padding:6px 10px;border-bottom:1px solid #eee'>{rem.fecha_remision}</td>"
+            f"<td style='padding:6px 10px;border-bottom:1px solid #eee;text-align:right'>{_fmt_money(subtotal)}</td>"
+            "</tr>"
+        )
+    n = len(rems)
+    etiqueta = "remisión" if n == 1 else "remisiones"
+    mensaje_html = (
+        "<div style='background:#f5f7ff;border-left:3px solid #4f6bed;"
+        "padding:10px 14px;margin:0 0 16px;border-radius:4px;white-space:pre-line'>"
+        f"{mensaje}</div>"
+        if mensaje else ""
+    )
+    return (
+        "<div style='font-family:Arial,Helvetica,sans-serif;color:#222;max-width:640px'>"
+        f"<h2 style='margin:0 0 4px'>{emisor_nombre}</h2>"
+        f"<p style='margin:0 0 16px;color:#555'>Estimado(a) <strong>{cliente_nombre}</strong>:</p>"
+        + mensaje_html
+        + f"<p style='margin:0 0 16px'>Le compartimos {n} {etiqueta}. "
+        "El detalle completo de cada una se encuentra en el PDF adjunto correspondiente.</p>"
+        "<table style='border-collapse:collapse;width:100%;font-size:14px'>"
+        "<thead><tr style='background:#f5f5f5'>"
+        "<th style='padding:6px 10px;text-align:left'>Remisión</th>"
+        "<th style='padding:6px 10px;text-align:left'>Fecha</th>"
+        "<th style='padding:6px 10px;text-align:right'>Total</th>"
+        "</tr></thead><tbody>"
+        + "".join(filas)
+        + "</tbody></table>"
+        f"<p style='margin:16px 0 0;text-align:right;font-size:16px'>"
+        f"<strong>Total general: {_fmt_money(total_general)}</strong></p>"
+        "<p style='margin:24px 0 0;color:#999;font-size:12px'>"
+        "Correo enviado automáticamente por SmartSupply.</p>"
         "</div>"
     )
 
@@ -483,6 +585,88 @@ def enviar_remision(
     except Exception as exc:  # noqa: BLE001 — superficie del error al cliente
         raise HTTPException(status_code=502, detail=str(exc))
     return {"ok": True, "to": ", ".join(destinatarios)}
+
+
+@router.post("/enviar-lote")
+def enviar_remisiones_lote(
+    payload: EnviarRemisionesLoteIn = Body(...),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_WRITE)),
+):
+    """Un SOLO correo con todas las remisiones indicadas (un PDF adjunto por
+    remisión). Pensado para el envío masivo agrupado por cliente: cada cliente
+    recibe un único correo con todas sus remisiones."""
+    if not payload.ids:
+        raise HTTPException(status_code=422, detail="Sin remisiones para enviar")
+    rems = (
+        db.query(Remision)
+        .filter(Remision.id.in_(payload.ids), Remision.deleted_at.is_(None))
+        .order_by(Remision.folio_interno)
+        .all()
+    )
+    if not rems:
+        raise HTTPException(status_code=404, detail="No se encontraron remisiones")
+
+    # El envío masivo agrupa por cliente, así que todas deben ser del mismo.
+    cli_ids = {r.cliente_facturacion_id for r in rems}
+    if len(cli_ids) > 1:
+        raise HTTPException(status_code=422, detail="Las remisiones deben ser del mismo cliente")
+    cliente = db.query(Cliente).filter(Cliente.id == next(iter(cli_ids))).one_or_none()
+
+    # Destinatarios: los del payload (uno o varios, coma/espacio) o, en su
+    # defecto, los correos del cliente (`correos` array, o el `email` legado).
+    destinatarios: list[str] = []
+    if payload.to:
+        destinatarios = [c for c in payload.to.replace(",", " ").split() if c]
+    if not destinatarios and cliente is not None:
+        dom = cliente.domicilio_fiscal or {}
+        correos = dom.get("correos")
+        if isinstance(correos, list):
+            destinatarios = [str(c).strip() for c in correos if str(c).strip()]
+        elif dom.get("email"):
+            destinatarios = [str(dom["email"]).strip()]
+    if not destinatarios:
+        raise HTTPException(status_code=422, detail="El cliente no tiene correo")
+
+    tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one_or_none()
+    if not email_service.configured(tenant):
+        raise HTTPException(status_code=503, detail="El correo no está configurado")
+
+    # Nombres de producto de todas las remisiones (para el cuerpo y los PDFs).
+    prod_ids = {ln.producto_id for r in rems for ln in r.lineas}
+    names = dict(db.query(Producto.id, Producto.nombre).filter(Producto.id.in_(prod_ids)).all())
+    for r in rems:
+        for ln in r.lineas:
+            ln.producto_nombre = names.get(ln.producto_id)
+
+    cliente_nombre = cliente.legal_name if cliente else ""
+    emisor_nombre = (tenant.trade_name or tenant.legal_name) if tenant else "SmartSupply"
+    mensaje = (payload.mensaje or "").strip() or None
+    html = _build_remisiones_lote_html(rems, cliente_nombre, mensaje, emisor_nombre)
+
+    # Un PDF adjunto por remisión.
+    attachments: list[tuple[str, bytes, str]] = []
+    for r in rems:
+        pdf = build_remision_pdf(r, tenant, cliente, names)
+        folio = r.folio_interno or str(r.id)
+        attachments.append((f"{folio}.pdf", pdf, "application/pdf"))
+
+    n = len(rems)
+    asunto = (
+        f"Remisión {rems[0].folio_interno}" if n == 1
+        else f"{n} remisiones — {emisor_nombre}"
+    )
+    try:
+        email_service.send_email(
+            email_service.smtp_config(tenant),
+            destinatarios,
+            asunto,
+            html,
+            attachments=attachments,
+        )
+    except Exception as exc:  # noqa: BLE001 — superficie del error al cliente
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"ok": True, "to": ", ".join(destinatarios), "remisiones": n}
 
 
 @router.get("/{rem_id}/pdf")

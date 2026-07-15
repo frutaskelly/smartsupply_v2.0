@@ -2,10 +2,11 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Check, ClipboardPaste, FileText, Mail, Plus, Printer, Trash2, X } from "lucide-react";
+import { Check, ClipboardPaste, FileText, Mail, Pencil, Plus, Printer, Sparkles, Trash2, X } from "lucide-react";
 
 import { KeyboardCombobox, type ComboOption } from "@/components/KeyboardCombobox";
 import { ProductoCombobox, type ProductoPick } from "@/components/ProductoCombobox";
+import { CrearProductoModal, type ProductoCreado } from "@/components/CrearProductoModal";
 import { Alert } from "@/components/ui/Alert";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -21,7 +22,7 @@ import { ApiError, apiFetch, apiOpenInTab } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import { fmtDate, fmtMoney, fmtNumber } from "@/lib/format";
 import { useMutation, useResource, type Page } from "@/lib/hooks";
-import type { Almacen, Cliente, MatchResult, Producto, Remision, RemisionDetail, Serie, Sucursal } from "@/lib/types";
+import type { Almacen, Candidato, Cliente, LineaPegada, MatchResult, Producto, Remision, RemisionDetail, Serie, Sucursal } from "@/lib/types";
 
 const WRITE = "remision:gestionar";
 
@@ -65,6 +66,11 @@ type LineaForm = {
   precio: string;           // vacío = se resuelve en backend
   precioManual: boolean;
   importe: number;
+  // Solo para líneas venidas de "Pegar de Excel": alimentan la columna Match IA
+  // (visible únicamente mientras haya líneas pegadas por revisar).
+  fromPaste?: boolean;
+  candidatos?: Candidato[];  // sugerencias del cruce (para el selector Match IA)
+  presPegada?: string;       // presentación tal como se pegó (texto libre)
 };
 
 let _seq = 0;
@@ -82,11 +88,25 @@ const nuevaLinea = (over: Partial<LineaForm> = {}): LineaForm => ({
   ...over,
 });
 
+// Valor especial del selector Match IA: "no está en el catálogo, crear nuevo".
+const NUEVO_PRODUCTO = "__nuevo__";
+
+// Puntos suspensivos animados para indicar "trabajando" (ancho fijo para que
+// el botón no salte). Cicla "" → "." → ".." → "..." cada 400 ms.
+function LoadingDots() {
+  const [n, setN] = useState(1);
+  useEffect(() => {
+    const id = setInterval(() => setN((x) => (x % 3) + 1), 400);
+    return () => clearInterval(id);
+  }, []);
+  return <span className="inline-block w-4 text-left">{".".repeat(n)}</span>;
+}
+
 export default function RemisionesPage() {
   const { me } = useAuth();
   const toast = useToast();
   const canWrite = can(me, WRITE);
-  const { post, loading: saving } = useMutation();
+  const { post, patch, loading: saving } = useMutation();
   const router = useRouter();
 
   // catálogos
@@ -135,8 +155,9 @@ export default function RemisionesPage() {
   const [selectionResetKey, setSelectionResetKey] = useState(0);
   const clearSelection = () => { setSelected([]); setSelectionResetKey((k) => k + 1); };
 
-  // modo crear
+  // modo crear/editar. `editId` = remisión (BORRADOR) que se está editando; null = alta nueva.
   const [mode, setMode] = useState<"list" | "create">("list");
+  const [editId, setEditId] = useState<string | null>(null);
   const [clienteId, setClienteId] = useState("");
   const [sucursalId, setSucursalId] = useState("");
   const [almacenId, setAlmacenId] = useState("");
@@ -227,8 +248,50 @@ export default function RemisionesPage() {
   }
 
   function openCreate() {
+    setEditId(null);
     resetForm();
     setMode("create");
+  }
+
+  // Abre esta misma pantalla para EDITAR una remisión en BORRADOR: carga sus
+  // datos y líneas. Solo BORRADOR es editable (el backend lo exige).
+  async function openEdit(r: Remision) {
+    if (r.estado !== "BORRADOR") { toast.error("Solo se puede editar una remisión en borrador"); return; }
+    try {
+      const det = await apiFetch<RemisionDetail>(`/api/v1/remisiones/${r.id}`);
+      setClienteId(det.cliente_facturacion_id);
+      setSucursalId(det.sucursal_id ?? "");
+      setAlmacenId(det.almacen_id ?? "");
+      setSerieOverride("");                       // el folio ya está fijo; no se re-serie al editar
+      setFecha(det.fecha_remision ?? today());
+      setNotas(det.notas ?? "");
+      setLineas((det.lineas ?? []).map((ln) => {
+        const presKeys = Object.keys(prodById[ln.producto_id]?.presentaciones ?? {});
+        return nuevaLinea({
+          texto: ln.producto_nombre ?? "",
+          producto_id: ln.producto_id,
+          label: ln.producto_nombre ?? "",
+          presentaciones: presKeys.length ? presKeys : [ln.presentacion],
+          presentacion: ln.presentacion,
+          cantidad: String(ln.cantidad_solicitada),
+          precio: String(ln.precio_unitario),
+          precioManual: true,                     // conserva el precio guardado
+          importe: Number(ln.importe),
+        });
+      }));
+      setStep(null);                              // no auto-abre el cliente al editar
+      setEditId(r.id);
+      setMode("create");
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "No se pudo cargar la remisión");
+    }
+  }
+
+  // Crea (POST) o actualiza (PATCH) según si estamos editando.
+  function persistirRemision(payload: unknown) {
+    return editId
+      ? patch<RemisionDetail>(`/api/v1/remisiones/${editId}`, payload)
+      : post<RemisionDetail>("/api/v1/remisiones", payload);
   }
 
   function setLinea(key: string, patch: Partial<LineaForm>) {
@@ -307,72 +370,200 @@ export default function RemisionesPage() {
 
   // ── pegar como Excel ──
   const [pasteText, setPasteText] = useState("");
+  const [procesando, setProcesando] = useState(false);
+  // Línea (key) que pidió "Crear producto nuevo" desde la columna Match IA.
+  const [crearParaKey, setCrearParaKey] = useState<string | null>(null);
 
-  // Interpreta una fila pegada SIN asumir un orden fijo de columnas: la(s)
-  // celda(s) no numérica(s) son el producto (y, de haber una segunda, la
-  // presentación); de las celdas numéricas, la primera es cantidad y la
-  // segunda precio — sin importar en qué posición de la fila vengan ni
-  // espacios extra alrededor de cada valor.
+  // Interpreta una fila pegada SIN asumir un orden fijo de columnas (fallback
+  // local si el backend no está disponible): las celdas numéricas son
+  // cantidad/precio; la celda que es una unidad conocida es la presentación y
+  // el texto restante es el producto — así 'KILOGRAMO' antes de 'AJO' se lee bien.
+  const UNIDADES = new Set([
+    "kilogramo", "kilogramos", "kilo", "kilos", "kg", "kgs", "gramo", "gramos", "g", "gr",
+    "pieza", "piezas", "pza", "pzas", "pz", "litro", "litros", "lt", "lts", "l", "ml",
+    "caja", "cajas", "bulto", "bultos", "costal", "manojo", "paquete", "paq", "docena",
+    "bolsa", "domo", "charola", "malla", "atado", "racimo", "unidad", "unidades", "und",
+  ]);
+  const HEADER_WORDS = new Set([
+    "cantidad", "cant", "unidad", "unidades", "presentacion", "descripcion", "producto",
+    "articulo", "precio", "costo", "importe", "total", "concepto", "clave", "codigo", "sku",
+  ]);
+  const norm = (s: string) =>
+    s.normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9 ]/g, " ").trim().replace(/\s+/g, " ");
+  const esNum = (s: string) => {
+    const t = s.replace(/[$,%\s]/g, "");
+    return t !== "" && !Number.isNaN(Number(t));
+  };
+  function filaEsEncabezado(cols: string[]) {
+    const celdas = cols.map((c) => c.trim()).filter(Boolean);
+    if (celdas.length === 0) return true;
+    if (celdas.some(esNum)) return false;
+    return celdas.some((c) => HEADER_WORDS.has(norm(c)));
+  }
   function parseFilaPegada(cols: string[]) {
     const celdas = cols.map((c) => c.replace(/\s+/g, " ").trim()).filter(Boolean);
     const numericas: string[] = [];
     const textos: string[] = [];
     for (const c of celdas) {
-      const n = Number(c.replace(",", "."));
-      if (/^-?[\d.,]+$/.test(c) && !Number.isNaN(n)) numericas.push(String(n));
+      if (esNum(c)) numericas.push(String(Number(c.replace(/[$,%\s]/g, ""))));
       else textos.push(c);
     }
+    const unidad = textos.find((t) => UNIDADES.has(norm(t)));
+    const producto = textos.find((t) => t !== unidad) ?? "";
     return {
-      texto: textos[0] ?? "",
-      presentacion: textos[1] ?? "",
+      texto: producto,
+      presentacion: unidad ?? "",
       cantidad: numericas[0] && Number(numericas[0]) ? numericas[0] : "1",
       precio: numericas[1] && Number(numericas[1]) ? numericas[1] : "",
     };
   }
 
-  async function procesarPaste() {
-    const filas = pasteText
+  // Fallback local: parsea filas y cruza con /match (IA incluida) si el
+  // endpoint /parse-pegado no responde (backend viejo).
+  async function pegarLocalFallback(raw: string): Promise<LineaPegada[]> {
+    const parsed = raw
       .split("\n")
-      .map((r) => r.trim())
-      .filter(Boolean)
-      .map((r) => r.split("\t"));
-    if (filas.length === 0) return;
-    const parsed = filas.map(parseFilaPegada);
-    const textos = parsed.map((p) => p.texto);
+      .map((r) => r.split("\t"))
+      .filter((c) => c.some((x) => x.trim()))
+      .filter((c) => !filaEsEncabezado(c))
+      .map(parseFilaPegada)
+      .filter((p) => p.texto);
     let matches: MatchResult[] = [];
     try {
       matches = await apiFetch("/api/v1/productos/match", {
         method: "POST",
-        body: JSON.stringify({ textos, usar_ia: false, limit: 1 }),
+        body: JSON.stringify({ textos: parsed.map((p) => p.texto), usar_ia: true, limit: 1 }),
       });
-    } catch {
-      matches = [];
-    }
-    const nuevas: LineaForm[] = parsed.map(({ texto, cantidad, precio, presentacion: presIn }, i) => {
-      const precioOver: Partial<LineaForm> = precio ? { precio, precioManual: true } : {};
-      const top = matches[i]?.candidatos?.[0];
-      const auto = top && (top.origen === "exacto" || top.origen === "alias" || top.score >= 85) ? top : null;
-      if (auto) {
-        const presKeys = Object.keys(auto.presentaciones ?? {});
-        const def = auto.presentacion_default ?? auto.unidad_base ?? presKeys[0] ?? "PIEZA";
-        const presentacion = presIn && presKeys.includes(presIn) ? presIn : presKeys.includes(def) ? def : presKeys[0] ?? def;
-        return nuevaLinea({
-          texto, producto_id: auto.producto_id, label: auto.nombre,
-          presentaciones: presKeys, presentacion, cantidad, ...precioOver,
-        });
-      }
-      return nuevaLinea({ texto, cantidad, presentacion: presIn, ...precioOver }); // sin resolver → el usuario confirma
-    });
-    setLineas((ls) => {
-      const base = ls.filter((l) => l.producto_id || l.texto);
-      return [...base, ...nuevas];
-    });
-    // cotizar las que sí resolvieron (respeta precioManual si venía precio pegado)
-    nuevas.forEach((l) => l.producto_id && cotizar(l.key, l.producto_id, l.presentacion, l.cantidad));
-    setPasteText("");
-    setPasteOpen(false);
-    toast.success(`${nuevas.length} líneas agregadas`);
+    } catch { matches = []; }
+    return parsed.map((p, i) => ({ ...p, candidatos: matches[i]?.candidatos ?? [] }));
   }
+
+  // Mapea la presentación pegada (texto libre) a una de las presentaciones REALES
+  // del producto elegido: 'KILOGRAMOS' → 'KILO'. Si no calza, usa la default /
+  // unidad base / la primera disponible.
+  function matchPresentacion(pegada: string, cand?: Candidato): string {
+    const keys = Object.keys(cand?.presentaciones ?? {});
+    if (keys.length === 0) return (pegada || cand?.unidad_base || "PIEZA").toUpperCase();
+    const p = norm(pegada);
+    const fallback = cand?.presentacion_default ?? cand?.unidad_base ?? keys[0];
+    if (!p) return keys.includes(fallback) ? fallback : keys[0];
+    let hit = keys.find((k) => norm(k) === p);
+    if (!hit) hit = keys.find((k) => { const nk = norm(k); return nk.startsWith(p) || p.startsWith(nk) || nk.includes(p) || p.includes(nk); });
+    return hit ?? (keys.includes(fallback) ? fallback : keys[0]);
+  }
+
+  const NUEVO = NUEVO_PRODUCTO;
+  // Auto-resuelve solo con confianza alta (exacto/alias/IA/≥85); lo demás entra
+  // como "por revisar" (Match IA en 'Crear nuevo', pero con las sugerencias a un clic).
+  const esConfiable = (c?: Candidato) =>
+    !!c && (c.origen === "exacto" || c.origen === "alias" || c.origen === "ia" || c.score >= 85);
+
+  // Convierte una fila pegada en una línea de la tabla, guardando sus candidatos
+  // para la columna Match IA.
+  function lineaDesdePegado(f: LineaPegada): LineaForm {
+    const precioOver: Partial<LineaForm> = f.precio ? { precio: f.precio, precioManual: true } : {};
+    const meta = { candidatos: f.candidatos ?? [], presPegada: f.presentacion, fromPaste: true };
+    const top = f.candidatos?.[0];
+    if (esConfiable(top)) {
+      const presKeys = Object.keys(top!.presentaciones ?? {});
+      return nuevaLinea({
+        texto: f.texto, producto_id: top!.producto_id, label: top!.nombre,
+        presentaciones: presKeys, presentacion: matchPresentacion(f.presentacion, top),
+        cantidad: f.cantidad || "1", ...meta, ...precioOver,
+      });
+    }
+    return nuevaLinea({
+      texto: f.texto, cantidad: f.cantidad || "1",
+      presentacion: f.presentacion || "PIEZA", ...meta, ...precioOver,
+    });
+  }
+
+  function cerrarPaste() {
+    setPasteOpen(false);
+    setPasteText("");
+  }
+
+  // "Procesar": parsea + cruza e inserta las líneas DIRECTO en la tabla; la
+  // columna Match IA aparece para revisarlas ahí mismo (sin popup).
+  async function procesarPaste() {
+    const raw = pasteText;
+    if (!raw.trim()) return;
+    setProcesando(true);
+    try {
+      let filas: LineaPegada[] = [];
+      try {
+        filas = await apiFetch("/api/v1/productos/parse-pegado", {
+          method: "POST",
+          body: JSON.stringify({ texto: raw, usar_ia: true }),
+        });
+      } catch {
+        filas = await pegarLocalFallback(raw); // backend sin el endpoint nuevo
+      }
+      if (filas.length === 0) { toast.error("No se detectaron líneas en el texto pegado"); return; }
+      const nuevas = filas.map(lineaDesdePegado);
+      setLineas((ls) => {
+        const base = ls.filter((l) => l.producto_id || l.texto);
+        return [...base, ...nuevas];
+      });
+      nuevas.forEach((l) => l.producto_id && cotizar(l.key, l.producto_id, l.presentacion, l.cantidad));
+      const porRevisar = nuevas.filter((l) => !l.producto_id).length;
+      cerrarPaste();
+      toast.success(`${nuevas.length} líneas agregadas` + (porRevisar ? ` · ${porRevisar} por revisar en Match IA` : ""));
+    } finally {
+      setProcesando(false);
+    }
+  }
+
+  // Deriva la unidad base del alta rápida desde la presentación pegada
+  // ('KILOGRAMO' → 'KILO', 'PZA' → 'PIEZA').
+  function unidadBaseDesde(pres?: string): string {
+    const p = norm(pres ?? "");
+    if (!p) return "KILO";
+    const hit = ["KILO", "PIEZA", "LITRO", "CAJA", "BULTO", "COSTAL", "MANOJO", "BOLSA"]
+      .find((u) => { const n = norm(u); return p.startsWith(n) || n.startsWith(p) || p.includes(n); });
+    return hit ?? "KILO";
+  }
+
+  // Cambia el producto de una línea desde el selector Match IA (columna nueva).
+  // "Crear nuevo" abre el popup de alta de producto precargado con el texto pegado.
+  function resolverMatchIA(key: string, sel: string) {
+    const l = lineas.find((x) => x.key === key);
+    if (!l) return;
+    if (sel === NUEVO) {
+      setLinea(key, { producto_id: "", label: "", presentaciones: [], presentacion: l.presPegada || l.presentacion, importe: 0 });
+      setCrearParaKey(key);   // abre el popup para crear el producto en el catálogo
+      return;
+    }
+    const cand = (l.candidatos ?? []).find((c) => c.producto_id === sel);
+    if (!cand) return;
+    // Aprende el alias cuando el usuario confirma un cruce no exacto.
+    if (cand.origen !== "exacto" && norm(l.texto) !== norm(cand.nombre)) {
+      apiFetch("/api/v1/productos/alias", {
+        method: "POST",
+        body: JSON.stringify({ texto: l.texto, producto_id: cand.producto_id }),
+      }).catch(() => {});
+    }
+    const presKeys = Object.keys(cand.presentaciones ?? {});
+    const presentacion = matchPresentacion(l.presPegada ?? l.presentacion, cand);
+    setLinea(key, { producto_id: cand.producto_id, label: cand.nombre, presentaciones: presKeys, presentacion });
+    cotizar(key, cand.producto_id, presentacion, l.cantidad);
+  }
+
+  // Producto recién creado desde el popup → resuelve la línea que lo pidió.
+  function aplicarProductoCreado(prod: ProductoCreado) {
+    const key = crearParaKey;
+    if (!key) return;
+    const l = lineas.find((x) => x.key === key);
+    const presKeys = Object.keys(prod.presentaciones ?? {});
+    const presentacion = prod.presentacion_default ?? prod.unidad_base ?? presKeys[0] ?? (l?.presPegada || "PIEZA");
+    setLinea(key, { producto_id: prod.id, label: prod.nombre, presentaciones: presKeys, presentacion });
+    if (l) cotizar(key, prod.id, presentacion, l.cantidad);
+    setCrearParaKey(null);
+  }
+
+  // La columna Match IA solo existe mientras haya líneas venidas de "Pegar de Excel".
+  const showMatchIA = lineas.some((l) => l.fromPaste);
+  const lineaCrear = crearParaKey ? lineas.find((l) => l.key === crearParaKey) : undefined;
 
   // ── pegar una columna directo en la celda (como Excel): pega varias líneas
   // sobre Cantidad o Producto y se reparten hacia abajo desde la fila actual,
@@ -481,13 +672,14 @@ export default function RemisionesPage() {
     if (!payload) return;
     setGuardarChoiceOpen(false);
     try {
-      const rem = await post<RemisionDetail>("/api/v1/remisiones", payload);
-      toast.success(`Remisión ${rem.folio_interno} guardada (borrador)`);
+      const rem = await persistirRemision(payload);
+      toast.success(`Remisión ${rem.folio_interno} ${editId ? "actualizada" : "guardada (borrador)"}`);
+      setEditId(null);
       resetForm();
       setMode("list");
       reload();
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "No se pudo crear la remisión");
+      toast.error(e instanceof ApiError ? e.message : "No se pudo guardar la remisión");
     }
   }
 
@@ -501,13 +693,14 @@ export default function RemisionesPage() {
     if (!payload) return;
     setGuardarChoiceOpen(false);
     try {
-      const rem = await post<RemisionDetail>("/api/v1/remisiones", payload);
+      const rem = await persistirRemision(payload);
       await confirmarRemision(rem.id, rem.folio_interno);
+      setEditId(null);
       resetForm();
       setMode("list");
       reload();
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "No se pudo crear la remisión");
+      toast.error(e instanceof ApiError ? e.message : "No se pudo guardar la remisión");
     }
   }
 
@@ -519,7 +712,8 @@ export default function RemisionesPage() {
     if (!payload) return;
     setGuardarChoiceOpen(false);
     try {
-      const rem = await post<RemisionDetail>("/api/v1/remisiones", payload);
+      const rem = await persistirRemision(payload);
+      setEditId(null);
       resetForm();
       setMode("list");
       reload();
@@ -870,22 +1064,23 @@ export default function RemisionesPage() {
     if (activos.length === 0) { toast.error("No hay correos: agrega al menos uno o cancela"); return; }
     const mensaje = bulkSendMensaje.trim() || undefined;
     setBulkSendBusy(true);
+    // Un correo por cliente: cada cliente recibe TODAS sus remisiones en un solo
+    // correo (un PDF adjunto por remisión). ok/fail cuentan correos (clientes).
     let ok = 0, fail = 0;
     try {
       for (const row of activos) {
-        for (const remId of row.remIds) {
-          try {
-            await apiFetch(`/api/v1/remisiones/${remId}/enviar`, {
-              method: "POST", body: JSON.stringify({ to: row.correos.trim(), mensaje }),
-            });
-            ok += 1;
-          } catch { fail += 1; }
-        }
+        try {
+          await apiFetch(`/api/v1/remisiones/enviar-lote`, {
+            method: "POST",
+            body: JSON.stringify({ ids: row.remIds, to: row.correos.trim(), mensaje }),
+          });
+          ok += 1;
+        } catch { fail += 1; }
       }
-      const ignoradas = bulkSendRows.filter((r) => !r.correos.trim()).reduce((s, r) => s + r.remIds.length, 0);
-      const partes = [`Enviadas: ${ok}`];
-      if (fail) partes.push(`${fail} fallidas`);
-      if (ignoradas) partes.push(`${ignoradas} ignoradas (sin correo)`);
+      const ignorados = bulkSendRows.filter((r) => !r.correos.trim()).length;
+      const partes = [`Correos enviados: ${ok}`];
+      if (fail) partes.push(`${fail} fallidos`);
+      if (ignorados) partes.push(`${ignorados} cliente(s) ignorado(s)`);
       toast[fail === 0 ? "success" : "error"](partes.join(" · "));
       setBulkSendOpen(false);
       clearSelection();
@@ -1092,6 +1287,8 @@ export default function RemisionesPage() {
   ];
 
   const rowActions: RowAction<Remision>[] = [
+    { id: "editar", label: "Editar", icon: <Pencil size={15} />, onClick: (r) => { void openEdit(r); },
+      hidden: (r) => !(canWrite && r.estado === "BORRADOR") },
     { id: "confirmar", label: "Confirmar", icon: <Check size={15} />, tone: "success",
       onClick: (r) => setToConfirm(r), hidden: (r) => !(canWrite && r.estado === "BORRADOR") },
     { id: "cancelar", label: "Cancelar", icon: <X size={15} />, tone: "danger",
@@ -1106,9 +1303,9 @@ export default function RemisionesPage() {
     return (
       <div>
         <PageHeader
-          title="Nueva remisión"
+          title={editId ? "Editar remisión" : "Nueva remisión"}
           subtitle="Borrador — al confirmar se reserva el inventario"
-          actions={<Button variant="secondary" onClick={() => setMode("list")}><X size={16} /> Cancelar</Button>}
+          actions={<Button variant="secondary" onClick={() => { setEditId(null); setMode("list"); }}><X size={16} /> Cancelar</Button>}
         />
 
         <div className="grid grid-cols-1 gap-4 rounded-xl border border-border p-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -1174,17 +1371,22 @@ export default function RemisionesPage() {
 
           <div className="space-y-2">
             <div className="hidden grid-cols-12 gap-2 px-1 text-xs text-muted sm:grid">
-              <div className="col-span-2">Cantidad</div>
+              <div className={showMatchIA ? "col-span-1" : "col-span-2"}>Cantidad</div>
               <div className="col-span-3">Producto</div>
+              {showMatchIA && <div className="col-span-3 inline-flex items-center gap-1"><Sparkles size={12} /> Match IA</div>}
               <div className="col-span-2">Presentación</div>
               <div className="col-span-2">Precio</div>
-              <div className="col-span-1 text-right">IEPS</div>
-              <div className="col-span-1 text-right">IVA</div>
+              {!showMatchIA && <div className="col-span-1 text-right">IEPS</div>}
+              {!showMatchIA && <div className="col-span-1 text-right">IVA</div>}
               <div className="col-span-1 text-right">Importe</div>
             </div>
-            {lineas.map((l) => (
+            {lineas.map((l) => {
+              // En el desplegable Match IA solo se ofrecen coincidencias ≥80%.
+              const cands = (l.candidatos ?? []).filter((c) => c.score >= 80);
+              const enCands = cands.some((c) => c.producto_id === l.producto_id);
+              return (
               <div key={l.key} className="grid grid-cols-12 items-start gap-2">
-                <div className="col-span-3 sm:col-span-2">
+                <div className={`col-span-3 ${showMatchIA ? "sm:col-span-1" : "sm:col-span-2"}`}>
                   <Input
                     inputMode="decimal" value={l.cantidad}
                     ref={(el) => { cellRefs.current[`${l.key}:cantidad`] = el; }}
@@ -1207,6 +1409,24 @@ export default function RemisionesPage() {
                     }}
                   />
                 </div>
+                {showMatchIA && (
+                  <div className="col-span-12 sm:col-span-3">
+                    {l.fromPaste ? (
+                      <Select
+                        value={l.producto_id || NUEVO_PRODUCTO}
+                        onChange={(e) => resolverMatchIA(l.key, e.target.value)}
+                      >
+                        {l.producto_id && !enCands && <option value={l.producto_id}>{l.label || "Producto elegido"}</option>}
+                        {cands.map((c) => (
+                          <option key={c.producto_id} value={c.producto_id}>{c.nombre} · {c.score}%{c.origen === "ia" ? " (IA)" : ""}</option>
+                        ))}
+                        <option value={NUEVO_PRODUCTO}>＋ Crear producto nuevo</option>
+                      </Select>
+                    ) : (
+                      <span className="text-xs text-muted">—</span>
+                    )}
+                  </div>
+                )}
                 <div className="col-span-4 sm:col-span-2">
                   <KeyboardCombobox
                     options={(l.presentaciones.length ? l.presentaciones : [l.presentacion]).map((p) => ({ value: p, label: p }))}
@@ -1225,18 +1445,23 @@ export default function RemisionesPage() {
                     onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); advanceLine(l.key, "precio"); } }}
                   />
                 </div>
-                <div className="col-span-2 flex items-center justify-end sm:col-span-1">
-                  <span className="text-sm tabular-nums">{fmtMoney((l.importe || 0) * Number(prodById[l.producto_id]?.ieps_tasa ?? 0))}</span>
-                </div>
-                <div className="col-span-2 flex items-center justify-end sm:col-span-1">
-                  <span className="text-sm tabular-nums">{fmtMoney((l.importe || 0) * Number(prodById[l.producto_id]?.iva_tasa ?? 0))}</span>
-                </div>
+                {!showMatchIA && (
+                  <div className="col-span-2 flex items-center justify-end sm:col-span-1">
+                    <span className="text-sm tabular-nums">{fmtMoney((l.importe || 0) * Number(prodById[l.producto_id]?.ieps_tasa ?? 0))}</span>
+                  </div>
+                )}
+                {!showMatchIA && (
+                  <div className="col-span-2 flex items-center justify-end sm:col-span-1">
+                    <span className="text-sm tabular-nums">{fmtMoney((l.importe || 0) * Number(prodById[l.producto_id]?.iva_tasa ?? 0))}</span>
+                  </div>
+                )}
                 <div className="col-span-2 flex items-center justify-end gap-1 sm:col-span-1">
                   <span className="text-sm tabular-nums">{fmtMoney(l.importe)}</span>
                   <button aria-label="Quitar línea" onClick={() => setLineas((ls) => ls.filter((x) => x.key !== l.key))} className="text-muted hover:text-danger"><Trash2 size={15} /></button>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
 
           <Field label="Notas">
@@ -1260,11 +1485,22 @@ export default function RemisionesPage() {
           </div>
         </div>
 
-        <Modal open={pasteOpen} onClose={() => setPasteOpen(false)} title="Pegar líneas desde Excel"
-          footer={<><Button variant="secondary" onClick={() => setPasteOpen(false)}>Cancelar</Button><Button onClick={procesarPaste}>Procesar</Button></>}>
-          <p className="mb-2 text-sm text-muted">Pega columnas separadas por tabulador (una fila por línea): <strong>producto</strong> y, en cualquier orden, <strong>cantidad</strong>, <strong>precio</strong> y/o <strong>presentación</strong> — el sistema detecta cuál es cuál. El producto se cruza automáticamente.</p>
+        <Modal open={pasteOpen} onClose={() => { if (!procesando) cerrarPaste(); }} title="Pegar líneas desde Excel"
+          footer={<>
+            <Button variant="secondary" onClick={cerrarPaste} disabled={procesando}>Cancelar</Button>
+            <Button onClick={procesarPaste} disabled={procesando}>{procesando ? <>Procesando<LoadingDots /></> : "Procesar"}</Button>
+          </>}>
+          <p className="mb-2 text-sm text-muted">Pega las columnas desde Excel (una fila por línea). La <strong>IA detecta</strong> qué columna es <strong>producto</strong>, <strong>cantidad</strong>, <strong>precio</strong> y <strong>presentación</strong> aunque vengan en cualquier orden, e <strong>ignora el encabezado</strong>. Las líneas entran a la tabla y una columna <strong>Match IA</strong> aparece para elegir el producto del catálogo o crearlo, ahí mismo.</p>
           <Textarea rows={8} value={pasteText} onChange={(e) => setPasteText(e.target.value)} placeholder={"zanahoria\t10\tKILO\njitomate\t5\t12.50"} />
         </Modal>
+
+        <CrearProductoModal
+          open={crearParaKey !== null}
+          onClose={() => setCrearParaKey(null)}
+          nombreInicial={lineaCrear?.texto ?? ""}
+          unidadBaseInicial={unidadBaseDesde(lineaCrear?.presPegada)}
+          onCreated={aplicarProductoCreado}
+        />
 
         <Modal open={guardarChoiceOpen} onClose={() => setGuardarChoiceOpen(false)} title="Guardar remisión"
           footer={
@@ -1467,8 +1703,9 @@ export default function RemisionesPage() {
       >
         <div className="space-y-3">
           <p className="text-sm text-muted">
-            Cada cliente recibe el <strong>PDF</strong> de sus remisiones. Edita o agrega correos
-            (coma/espacio); deja el campo <strong>en blanco para ignorar</strong> ese cliente.
+            Cada cliente recibe <strong>un solo correo</strong> con el <strong>PDF</strong> de todas
+            sus remisiones adjunto. Edita o agrega correos (coma/espacio); deja el campo{" "}
+            <strong>en blanco para ignorar</strong> ese cliente.
           </p>
           <div className="space-y-2">
             {bulkSendRows.map((row, i) => (

@@ -12,6 +12,7 @@ de ahí el paso 2 la resuelve al instante.
 from __future__ import annotations
 
 import logging
+import re
 import unicodedata
 from dataclasses import dataclass
 from typing import Optional
@@ -221,3 +222,225 @@ def sugerir_con_ia(db: Session, tenant_id: UUID, textos: list[str]) -> dict[str,
                 if isinstance(c, dict):
                     out[str(c.get("texto", ""))] = by_sku.get(str(c.get("sku", "")))
     return out
+
+
+# ─── Parseo de un bloque pegado (Excel) → líneas estructuradas ────────────────
+# Convierte texto tabular pegado en filas {producto, cantidad, precio,
+# presentacion} SIN asumir el orden de las columnas ni cuántas hay, y saltando
+# la fila de encabezado. Primero intenta con IA (entiende encabezados en español
+# y columnas fuera de orden); si no hay API key o falla, cae a un parser
+# determinista que clasifica CADA columna por su contenido en toda la tabla.
+
+_UNIDADES = {
+    "kilogramo", "kilogramos", "kilo", "kilos", "kg", "kgs", "k",
+    "gramo", "gramos", "g", "gr", "grs",
+    "pieza", "piezas", "pza", "pzas", "pz", "pieza(s)", "pzs",
+    "litro", "litros", "lt", "lts", "l", "ml", "mililitro", "mililitros",
+    "caja", "cajas", "cja", "bulto", "bultos", "costal", "costales",
+    "manojo", "manojos", "paquete", "paquetes", "paq", "docena", "docenas",
+    "bolsa", "bolsas", "domo", "domos", "charola", "charolas", "malla", "mallas",
+    "atado", "atados", "racimo", "racimos", "unidad", "unidades", "und", "un", "pkg",
+}
+_HEADER_WORDS = {
+    "cantidad", "cant", "cantidades", "qty", "unidad", "unidades", "um",
+    "presentacion", "descripcion", "producto", "productos", "articulo",
+    "articulos", "precio", "precios", "costo", "costos", "costo unitario",
+    "precio unitario", "importe", "total", "concepto", "conceptos", "clave",
+    "codigo", "sku", "pu", "p u", "no", "num", "numero", "partida",
+}
+
+
+def _es_numero(s: str) -> bool:
+    s = (s or "").strip().replace("$", "").replace(",", "").replace("%", "").replace(" ", "")
+    if not s:
+        return False
+    try:
+        float(s)
+        return True
+    except ValueError:
+        return False
+
+
+def _num(s: str) -> float:
+    return float((s or "").strip().replace("$", "").replace(",", "").replace(" ", ""))
+
+
+def _num_str(v, *, cero_vacio: bool) -> str:
+    """Normaliza un número a string sin ceros de más ('2.0'→'2'); '' si 0 y
+    `cero_vacio` (precio 0 = sin precio)."""
+    try:
+        f = float(str(v).strip().replace("$", "").replace(",", "")) if v not in (None, "") else 0.0
+    except (TypeError, ValueError):
+        return ""
+    if f == 0 and cero_vacio:
+        return ""
+    return f"{f:g}"
+
+
+def _fila_es_encabezado(cols: list[str]) -> bool:
+    """Una fila es encabezado si no trae ningún número y alguna celda es una
+    palabra típica de encabezado ('Cantidad', 'Descripción', 'Costo unitario')."""
+    celdas = [c.strip() for c in cols if c.strip()]
+    if not celdas:
+        return True
+    if any(_es_numero(c) for c in celdas):
+        return False
+    return any(normalizar(c) in _HEADER_WORDS for c in celdas)
+
+
+def _split_filas(texto: str) -> list[list[str]]:
+    filas: list[list[str]] = []
+    for linea in (texto or "").split("\n"):
+        if not linea.strip():
+            continue
+        cols = linea.split("\t")
+        if len(cols) == 1:  # sin tabuladores: intenta 2+ espacios como separador
+            cols = re.split(r"\s{2,}", linea.strip())
+        filas.append([c.strip() for c in cols])
+    return filas
+
+
+def parsear_pegado_deterministico(texto: str) -> list[dict]:
+    """Clasifica cada COLUMNA por su contenido en toda la tabla (no fila por
+    fila): la columna con unidades → presentación; las numéricas → cantidad
+    (menor magnitud) y precio (mayor); el texto restante más largo → producto.
+    Así 'KILOGRAMO' antes de 'AJO' se interpreta bien."""
+    filas = [r for r in _split_filas(texto) if not _fila_es_encabezado(r)]
+    if not filas:
+        return []
+    ncols = max(len(r) for r in filas)
+    filas = [r + [""] * (ncols - len(r)) for r in filas]
+    cols = [[r[i] for r in filas] for i in range(ncols)]
+
+    def frac(vals, pred) -> float:
+        nz = [v for v in vals if v]
+        return sum(1 for v in nz if pred(v)) / len(nz) if nz else 0.0
+
+    numericas = [i for i in range(ncols) if frac(cols[i], _es_numero) >= 0.6]
+    unidades = [
+        i for i in range(ncols)
+        if i not in numericas and frac(cols[i], lambda v: normalizar(v) in _UNIDADES) >= 0.5
+    ]
+
+    cantidad_col = precio_col = None
+    if len(numericas) >= 2:
+        prom = {
+            i: (sum(_num(v) for v in cols[i] if _es_numero(v))
+                / max(1, sum(1 for v in cols[i] if _es_numero(v))))
+            for i in numericas
+        }
+        cantidad_col = min(numericas, key=lambda i: prom[i])
+        precio_col = max(numericas, key=lambda i: prom[i])
+    elif len(numericas) == 1:
+        cantidad_col = numericas[0]
+
+    textos = [i for i in range(ncols) if i not in numericas and i not in unidades]
+    if not textos and unidades:  # no hay otra columna de texto: la 'unidad' es el producto
+        textos, unidades = unidades, []
+
+    def largo(i) -> float:
+        nz = [v for v in cols[i] if v]
+        return sum(len(v) for v in nz) / len(nz) if nz else 0.0
+
+    producto_col = max(textos, key=largo) if textos else None
+    presentacion_col = unidades[0] if unidades else None
+
+    out: list[dict] = []
+    for r in filas:
+        prod = r[producto_col].strip() if producto_col is not None else ""
+        if not prod:
+            continue
+        out.append({
+            "producto": prod,
+            "cantidad": _num_str(r[cantidad_col], cero_vacio=False) if cantidad_col is not None else "",
+            "precio": _num_str(r[precio_col], cero_vacio=True) if precio_col is not None else "",
+            "presentacion": r[presentacion_col].strip() if presentacion_col is not None else "",
+        })
+    for row in out:  # cantidad nunca vacía
+        if not row["cantidad"]:
+            row["cantidad"] = "1"
+    return out
+
+
+_PARSE_TOOL = {
+    "name": "registrar_lineas",
+    "description": "Registra las líneas de la tabla pegada, una por producto.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "lineas": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "producto": {"type": "string", "description": "Nombre/descripción del producto."},
+                        "cantidad": {"type": "number", "description": "Cantidad; 1 si no aparece."},
+                        "precio": {"type": "number", "description": "Precio o costo unitario; 0 si no aparece."},
+                        "presentacion": {"type": "string", "description": "Unidad (KILOGRAMO, PIEZA, LITRO…); vacío si no aparece."},
+                    },
+                    "required": ["producto", "cantidad", "precio", "presentacion"],
+                },
+            }
+        },
+        "required": ["lineas"],
+    },
+}
+
+
+def parsear_pegado_ia(texto: str) -> Optional[list[dict]]:
+    """Parsea el bloque pegado con IA. None si no hay API key o falla (→ fallback)."""
+    if not (texto or "").strip() or not settings.ANTHROPIC_API_KEY:
+        return None
+    try:
+        import anthropic
+    except ImportError:  # pragma: no cover
+        return None
+    system = (
+        "Recibes filas pegadas desde Excel u hoja de cálculo, con columnas separadas "
+        "por tabuladores. El ORDEN de las columnas varía entre pegados y puede haber una "
+        "fila de ENCABEZADO (p. ej. 'Cantidad  Unidad  Descripción  Costo unitario'). "
+        "Para cada fila de DATOS identifica: producto (la descripción/nombre del producto), "
+        "cantidad (número; 1 si no aparece), precio (precio o costo unitario, número; 0 si no "
+        "aparece) y presentacion (la unidad: KILOGRAMO, PIEZA, LITRO, etc.; vacío si no aparece). "
+        "OMITE la fila de encabezado y las filas vacías. No inventes filas ni valores."
+    )
+    try:
+        client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+        resp = client.messages.create(
+            model=getattr(settings, "SAT_AI_MODEL", "claude-sonnet-4-5"),
+            max_tokens=4096,
+            system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
+            tools=[_PARSE_TOOL],
+            tool_choice={"type": "tool", "name": "registrar_lineas"},
+            messages=[{"role": "user", "content": f"Filas pegadas:\n{texto}"}],
+        )
+    except Exception as exc:  # noqa: BLE001 — degradación elegante
+        logger.warning("parseo IA falló: %s", exc)
+        return None
+
+    for block in resp.content:
+        if getattr(block, "type", None) == "tool_use" and block.name == "registrar_lineas":
+            filas: list[dict] = []
+            for l in (block.input.get("lineas") or []):
+                if not isinstance(l, dict):
+                    continue
+                prod = str(l.get("producto", "")).strip()
+                if not prod:
+                    continue
+                filas.append({
+                    "producto": prod,
+                    "cantidad": _num_str(l.get("cantidad"), cero_vacio=False) or "1",
+                    "precio": _num_str(l.get("precio"), cero_vacio=True),
+                    "presentacion": str(l.get("presentacion", "")).strip(),
+                })
+            return filas
+    return None
+
+
+def parsear_pegado(texto: str, *, usar_ia: bool = True) -> list[dict]:
+    """Bloque pegado → líneas {producto, cantidad, precio, presentacion}."""
+    if usar_ia:
+        filas = parsear_pegado_ia(texto)
+        if filas is not None:
+            return filas
+    return parsear_pegado_deterministico(texto)
