@@ -213,7 +213,7 @@ const config: CrudConfig<Cliente> = {
     { name: "estado", label: "Estado" },
     { name: "pais", label: "País" },
     { name: "telefono", label: "Teléfono" },
-    { name: "email", label: "Email" },
+    { name: "email", label: "Correos", hint: "Uno o varios, separados por coma o espacio; se usan al enviar remisiones y facturas", colSpan: 2 },
     { name: "lista_precios_id", label: "Lista de precios", type: "select" },
     { name: "limite_credito", label: "Límite de crédito", type: "number", step: "0.01" },
     { name: "dias_credito", label: "Condiciones de pago (días)", type: "number" },
@@ -297,7 +297,10 @@ const config: CrudConfig<Cliente> = {
       cp: (dom.cp as string) ?? "",
       pais: (dom.pais as string) ?? "México",
       telefono: (dom.telefono as string) ?? "",
-      email: (dom.email as string) ?? "",
+      // Correos: array `correos` (varios) o el `email` legado (uno) → texto editable.
+      email: Array.isArray(dom.correos)
+        ? (dom.correos as string[]).join(", ")
+        : (dom.email as string) ?? "",
       lista_precios_id: c.lista_precios_id ?? "",
       limite_credito: c.limite_credito,
       dias_credito: String(c.dias_credito),
@@ -307,10 +310,17 @@ const config: CrudConfig<Cliente> = {
     };
   },
   toPayload: (v) => {
-    const domicilio_fiscal: Record<string, string> = {};
-    for (const k of ["cp", "calle", "colonia", "ciudad", "estado", "pais", "telefono", "email"] as const) {
+    const domicilio_fiscal: Record<string, string | string[]> = {};
+    for (const k of ["cp", "calle", "colonia", "ciudad", "estado", "pais", "telefono"] as const) {
       const val = (v[k] as string)?.trim?.();
       if (val) domicilio_fiscal[k] = val;
+    }
+    // Correos: uno o varios (coma/espacio) → array `correos`; `email` = primero
+    // para compatibilidad con lecturas antiguas.
+    const correos = ((v.email as string) || "").split(/[,\s]+/).map((s) => s.trim()).filter(Boolean);
+    if (correos.length) {
+      domicilio_fiscal.correos = correos;
+      domicilio_fiscal.email = correos[0];
     }
     return {
       // codigo lo genera el servidor; no se envía.

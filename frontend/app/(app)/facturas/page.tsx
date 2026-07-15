@@ -48,6 +48,14 @@ export default function FacturasPage() {
   const clientesRes = useResource<Page<Cliente>>("/api/v1/clientes?limit=500");
   const clientes = clientesRes.data?.items ?? [];
   const cliName = useMemo(() => Object.fromEntries(clientes.map((c) => [c.id, c.legal_name])), [clientes]);
+  // Correos por cliente (para autollenar el envío): array `correos` o el `email` legado.
+  const cliCorreos = useMemo(() => Object.fromEntries(clientes.map((c) => {
+    const dom = (c.domicilio_fiscal ?? {}) as Record<string, unknown>;
+    const arr = Array.isArray(dom.correos)
+      ? (dom.correos as string[])
+      : (dom.email ? [String(dom.email)] : []);
+    return [c.id, arr.join(", ")];
+  })), [clientes]);
 
   const seriesFacRes = useResource<Page<Serie>>("/api/v1/series?tipo_documento=FACTURA&activa=true&limit=200");
   const seriesFac = seriesFacRes.data?.items ?? [];
@@ -238,7 +246,7 @@ export default function FacturasPage() {
     });
   }
   function abrirEnviar(f: Factura) {
-    setEnviarTo(""); setEnviarMensaje(""); setToEnviar(f);
+    setEnviarTo(cliCorreos[f.cliente_id] ?? ""); setEnviarMensaje(""); setToEnviar(f);
   }
   async function enviarCorreo() {
     if (!toEnviar) return;

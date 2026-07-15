@@ -15,7 +15,7 @@ from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
@@ -44,6 +44,7 @@ from ...schemas.remision import (
     RemisionUpdate,
 )
 from ...services.inventario import build_movimiento, presentacion_factor, resolve_lote
+from ...services.remision_pdf import build_remision_pdf, build_remisiones_pdf
 from ._helpers import ensure_fk, flush_or_conflict, get_or_404, paginate
 
 router = APIRouter(prefix="/remisiones", tags=["remisiones"])
@@ -181,6 +182,43 @@ def create_remision(
     flush_or_conflict(db, detail=_DUP)
     db.refresh(rem)
     return rem
+
+
+@router.get("/pdf")
+def remisiones_pdf_lote(
+    ids: str = Query(..., description="IDs de remisión separados por coma"),
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """PDF de varias remisiones (una por página) con el diseño de la factura.
+    Definido ANTES de /{rem_id} para que la ruta estática gane."""
+    id_list: list[UUID] = []
+    for raw in ids.split(","):
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            id_list.append(UUID(raw))
+        except ValueError:
+            continue
+    if not id_list:
+        raise HTTPException(status_code=422, detail="Sin remisiones para imprimir")
+    rems = db.query(Remision).filter(
+        Remision.id.in_(id_list), Remision.deleted_at.is_(None)
+    ).order_by(Remision.folio_interno).all()
+    if not rems:
+        raise HTTPException(status_code=404, detail="No se encontraron remisiones")
+    tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
+    prod_ids = {ln.producto_id for r in rems for ln in r.lineas}
+    nombres = dict(db.query(Producto.id, Producto.nombre).filter(Producto.id.in_(prod_ids)).all())
+    cli_ids = {r.cliente_facturacion_id for r in rems}
+    clientes = {c.id: c for c in db.query(Cliente).filter(Cliente.id.in_(cli_ids)).all()}
+    items = [(r, clientes.get(r.cliente_facturacion_id), nombres) for r in rems]
+    pdf = build_remisiones_pdf(items, tenant)
+    return Response(
+        content=pdf, media_type="application/pdf",
+        headers={"Content-Disposition": 'inline; filename="remisiones.pdf"'},
+    )
 
 
 @router.get("/{rem_id}", response_model=RemisionDetailOut)
@@ -347,6 +385,7 @@ def cancelar_remision(
 
 class EnviarRemisionIn(BaseModel):
     to: Optional[str] = None
+    mensaje: Optional[str] = None
 
 
 def _fmt_money(value: Decimal) -> str:
@@ -399,10 +438,19 @@ def enviar_remision(
     rem = get_or_404(db, Remision, rem_id)
     cliente = db.query(Cliente).filter(Cliente.id == rem.cliente_facturacion_id).one_or_none()
 
-    to = (payload.to.strip() if payload and payload.to else None)
-    if not to and cliente is not None:
-        to = (cliente.domicilio_fiscal or {}).get("email")
-    if not to:
+    # Destinatarios: los que vengan en el payload (uno o varios, coma/espacio) o,
+    # en su defecto, los correos del cliente (`correos` array, o el `email` legado).
+    destinatarios: list[str] = []
+    if payload and payload.to:
+        destinatarios = [c for c in payload.to.replace(",", " ").split() if c]
+    if not destinatarios and cliente is not None:
+        dom = cliente.domicilio_fiscal or {}
+        correos = dom.get("correos")
+        if isinstance(correos, list):
+            destinatarios = [str(c).strip() for c in correos if str(c).strip()]
+        elif dom.get("email"):
+            destinatarios = [str(dom["email"]).strip()]
+    if not destinatarios:
         raise HTTPException(status_code=422, detail="El cliente no tiene correo")
 
     tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one_or_none()
@@ -416,18 +464,44 @@ def enviar_remision(
         ln.producto_nombre = names.get(ln.producto_id)
 
     cliente_nombre = cliente.legal_name if cliente else ""
-    html = _build_remision_html(rem, cliente_nombre, rem.lineas)
+    mensaje_html = f"<p>{payload.mensaje}</p>" if (payload and payload.mensaje) else ""
+    html = mensaje_html + _build_remision_html(rem, cliente_nombre, rem.lineas)
+
+    # Se adjunta el PDF de la remisión (mismo diseño que la factura).
+    folio = rem.folio_interno or ""
+    pdf = build_remision_pdf(rem, tenant, cliente, names)
+    attachments: list[tuple[str, bytes, str]] = [(f"{folio}.pdf", pdf, "application/pdf")]
 
     try:
         email_service.send_email(
             email_service.smtp_config(tenant),
-            [to],
-            f"Remisión {rem.folio_interno}",
+            destinatarios,
+            f"Remisión {folio}",
             html,
+            attachments=attachments,
         )
     except Exception as exc:  # noqa: BLE001 — superficie del error al cliente
         raise HTTPException(status_code=502, detail=str(exc))
-    return {"ok": True, "to": to}
+    return {"ok": True, "to": ", ".join(destinatarios)}
+
+
+@router.get("/{rem_id}/pdf")
+def remision_pdf(
+    rem_id: UUID,
+    db: Session = Depends(get_tenant_db),
+    ctx: AuthContext = Depends(require_permission(_READ)),
+):
+    """PDF de la remisión (mismo diseño que la factura, marcado NO FISCAL)."""
+    rem = get_or_404(db, Remision, rem_id)
+    cliente = db.query(Cliente).filter(Cliente.id == rem.cliente_facturacion_id).one_or_none()
+    tenant = db.query(Tenant).filter(Tenant.id == ctx.tenant_id).one()
+    prod_ids = {ln.producto_id for ln in rem.lineas}
+    nombres = dict(db.query(Producto.id, Producto.nombre).filter(Producto.id.in_(prod_ids)).all())
+    pdf = build_remision_pdf(rem, tenant, cliente, nombres)
+    return Response(
+        content=pdf, media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{rem.folio_interno}.pdf"'},
+    )
 
 
 @router.delete("/{rem_id}", status_code=status.HTTP_204_NO_CONTENT)
