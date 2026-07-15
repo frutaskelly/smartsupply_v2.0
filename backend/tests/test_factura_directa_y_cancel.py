@@ -105,8 +105,20 @@ def _disponible(env):
 
 
 # ── Factura directa ───────────────────────────────────────────────────────────
-def test_factura_directa_sin_inventario(client, env, auth):
+def test_factura_directa_requiere_almacen(client, env, auth):
+    """La factura directa ahora exige almacen_id (de ahí sale el inventario al
+    timbrar); sin él, 422."""
     body = {"cliente_id": env["cli"], "lineas": [
+        {"producto_id": env["prod"], "cantidad": "10", "precio_unitario": "20"},
+    ]}
+    r = client.post("/api/v1/facturas/directa", headers=_h(env), json=body)
+    assert r.status_code == 422, r.text
+
+
+def test_factura_directa_no_mueve_inventario_al_crear(client, env, auth):
+    """Al CREAR (BORRADOR) la factura directa no mueve inventario; el descuento
+    ocurre al timbrar. Aquí solo se valida la creación y sus totales."""
+    body = {"cliente_id": env["cli"], "almacen_id": env["alm"], "lineas": [
         {"producto_id": env["prod"], "cantidad": "10", "precio_unitario": "20"},
         {"producto_id": env["prod"], "cantidad": "5", "precio_unitario": "20"},
     ]}
@@ -119,7 +131,7 @@ def test_factura_directa_sin_inventario(client, env, auth):
     assert float(f["total"]) == 348.0
     assert len(f["lineas"]) == 2
     assert f["lineas"][0]["clave_prod_serv"] == "50406500"
-    # No se creó inventario ni lotes para esta factura
+    # Sin timbrar no hay lote ni movimiento para esta factura
     assert _disponible(env) == (None, None)
 
 
