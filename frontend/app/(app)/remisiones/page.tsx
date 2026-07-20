@@ -14,6 +14,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { DataTable, type Column, type RowAction } from "@/components/ui/DataTable";
 import { DataTableSmart } from "@/components/ui/DataTableSmart";
 import { Field, Input, Select, Textarea } from "@/components/ui/Field";
+import { LoadingDots } from "@/components/ui/LoadingDots";
 import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Spinner } from "@/components/ui/Spinner";
@@ -22,7 +23,11 @@ import { ApiError, apiFetch, apiOpenInTab } from "@/lib/api";
 import { can, useAuth } from "@/lib/auth";
 import { fmtDate, fmtMoney, fmtNumber } from "@/lib/format";
 import { useMutation, useResource, type Page } from "@/lib/hooks";
-import type { Almacen, Candidato, Cliente, LineaPegada, MatchResult, Producto, Remision, RemisionDetail, Serie, Sucursal } from "@/lib/types";
+import {
+  NUEVO_PRODUCTO, lineaDesdePegado, matchPresentacion, norm, nuevaLinea,
+  pegarLocalFallback, unidadBaseDesde, type LineaForm,
+} from "@/lib/lineas";
+import type { Almacen, Cliente, LineaPegada, MatchResult, Producto, Remision, RemisionDetail, Serie, Sucursal } from "@/lib/types";
 
 const WRITE = "remision:gestionar";
 
@@ -53,53 +58,6 @@ function puedeFacturar(r: Remision): boolean {
     (r.estado === "BORRADOR" || r.estado === "CONFIRMADA") &&
     (!r.factura_id || r.factura_estado === "CANCELADA")
   );
-}
-
-type LineaForm = {
-  key: string;
-  texto: string;            // lo que se mostró/pegó (para aprender alias / revisar)
-  producto_id: string;
-  label: string;            // "sku · nombre" cuando hay producto
-  presentacion: string;
-  presentaciones: string[];
-  cantidad: string;
-  precio: string;           // vacío = se resuelve en backend
-  precioManual: boolean;
-  importe: number;
-  // Solo para líneas venidas de "Pegar de Excel": alimentan la columna Match IA
-  // (visible únicamente mientras haya líneas pegadas por revisar).
-  fromPaste?: boolean;
-  candidatos?: Candidato[];  // sugerencias del cruce (para el selector Match IA)
-  presPegada?: string;       // presentación tal como se pegó (texto libre)
-};
-
-let _seq = 0;
-const nuevaLinea = (over: Partial<LineaForm> = {}): LineaForm => ({
-  key: `l${_seq++}`,
-  texto: "",
-  producto_id: "",
-  label: "",
-  presentacion: "",
-  presentaciones: [],
-  cantidad: "1",
-  precio: "",
-  precioManual: false,
-  importe: 0,
-  ...over,
-});
-
-// Valor especial del selector Match IA: "no está en el catálogo, crear nuevo".
-const NUEVO_PRODUCTO = "__nuevo__";
-
-// Puntos suspensivos animados para indicar "trabajando" (ancho fijo para que
-// el botón no salte). Cicla "" → "." → ".." → "..." cada 400 ms.
-function LoadingDots() {
-  const [n, setN] = useState(1);
-  useEffect(() => {
-    const id = setInterval(() => setN((x) => (x % 3) + 1), 400);
-    return () => clearInterval(id);
-  }, []);
-  return <span className="inline-block w-4 text-left">{".".repeat(n)}</span>;
 }
 
 export default function RemisionesPage() {
@@ -384,110 +342,6 @@ export default function RemisionesPage() {
   // Línea (key) que pidió "Crear producto nuevo" desde la columna Match IA.
   const [crearParaKey, setCrearParaKey] = useState<string | null>(null);
 
-  // Interpreta una fila pegada SIN asumir un orden fijo de columnas (fallback
-  // local si el backend no está disponible): las celdas numéricas son
-  // cantidad/precio; la celda que es una unidad conocida es la presentación y
-  // el texto restante es el producto — así 'KILOGRAMO' antes de 'AJO' se lee bien.
-  const UNIDADES = new Set([
-    "kilogramo", "kilogramos", "kilo", "kilos", "kg", "kgs", "gramo", "gramos", "g", "gr",
-    "pieza", "piezas", "pza", "pzas", "pz", "litro", "litros", "lt", "lts", "l", "ml",
-    "caja", "cajas", "bulto", "bultos", "costal", "manojo", "paquete", "paq", "docena",
-    "bolsa", "domo", "charola", "malla", "atado", "racimo", "unidad", "unidades", "und",
-  ]);
-  const HEADER_WORDS = new Set([
-    "cantidad", "cant", "unidad", "unidades", "presentacion", "descripcion", "producto",
-    "articulo", "precio", "costo", "importe", "total", "concepto", "clave", "codigo", "sku",
-  ]);
-  const norm = (s: string) =>
-    s.normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9 ]/g, " ").trim().replace(/\s+/g, " ");
-  const esNum = (s: string) => {
-    const t = s.replace(/[$,%\s]/g, "");
-    return t !== "" && !Number.isNaN(Number(t));
-  };
-  function filaEsEncabezado(cols: string[]) {
-    const celdas = cols.map((c) => c.trim()).filter(Boolean);
-    if (celdas.length === 0) return true;
-    if (celdas.some(esNum)) return false;
-    return celdas.some((c) => HEADER_WORDS.has(norm(c)));
-  }
-  function parseFilaPegada(cols: string[]) {
-    const celdas = cols.map((c) => c.replace(/\s+/g, " ").trim()).filter(Boolean);
-    const numericas: string[] = [];
-    const textos: string[] = [];
-    for (const c of celdas) {
-      if (esNum(c)) numericas.push(String(Number(c.replace(/[$,%\s]/g, ""))));
-      else textos.push(c);
-    }
-    const unidad = textos.find((t) => UNIDADES.has(norm(t)));
-    const producto = textos.find((t) => t !== unidad) ?? "";
-    return {
-      texto: producto,
-      presentacion: unidad ?? "",
-      cantidad: numericas[0] && Number(numericas[0]) ? numericas[0] : "1",
-      precio: numericas[1] && Number(numericas[1]) ? numericas[1] : "",
-    };
-  }
-
-  // Fallback local: parsea filas y cruza con /match (IA incluida) si el
-  // endpoint /parse-pegado no responde (backend viejo).
-  async function pegarLocalFallback(raw: string): Promise<LineaPegada[]> {
-    const parsed = raw
-      .split("\n")
-      .map((r) => r.split("\t"))
-      .filter((c) => c.some((x) => x.trim()))
-      .filter((c) => !filaEsEncabezado(c))
-      .map(parseFilaPegada)
-      .filter((p) => p.texto);
-    let matches: MatchResult[] = [];
-    try {
-      matches = await apiFetch("/api/v1/productos/match", {
-        method: "POST",
-        body: JSON.stringify({ textos: parsed.map((p) => p.texto), usar_ia: true, limit: 1 }),
-      });
-    } catch { matches = []; }
-    return parsed.map((p, i) => ({ ...p, candidatos: matches[i]?.candidatos ?? [] }));
-  }
-
-  // Mapea la presentación pegada (texto libre) a una de las presentaciones REALES
-  // del producto elegido: 'KILOGRAMOS' → 'KILO'. Si no calza, usa la default /
-  // unidad base / la primera disponible.
-  function matchPresentacion(pegada: string, cand?: Candidato): string {
-    const keys = Object.keys(cand?.presentaciones ?? {});
-    if (keys.length === 0) return (pegada || cand?.unidad_base || "PIEZA").toUpperCase();
-    const p = norm(pegada);
-    const fallback = cand?.presentacion_default ?? cand?.unidad_base ?? keys[0];
-    if (!p) return keys.includes(fallback) ? fallback : keys[0];
-    let hit = keys.find((k) => norm(k) === p);
-    if (!hit) hit = keys.find((k) => { const nk = norm(k); return nk.startsWith(p) || p.startsWith(nk) || nk.includes(p) || p.includes(nk); });
-    return hit ?? (keys.includes(fallback) ? fallback : keys[0]);
-  }
-
-  const NUEVO = NUEVO_PRODUCTO;
-  // Auto-resuelve solo con confianza alta (exacto/alias/IA/≥85); lo demás entra
-  // como "por revisar" (Match IA en 'Crear nuevo', pero con las sugerencias a un clic).
-  const esConfiable = (c?: Candidato) =>
-    !!c && (c.origen === "exacto" || c.origen === "alias" || c.origen === "ia" || c.score >= 85);
-
-  // Convierte una fila pegada en una línea de la tabla, guardando sus candidatos
-  // para la columna Match IA.
-  function lineaDesdePegado(f: LineaPegada): LineaForm {
-    const precioOver: Partial<LineaForm> = f.precio ? { precio: f.precio, precioManual: true } : {};
-    const meta = { candidatos: f.candidatos ?? [], presPegada: f.presentacion, fromPaste: true };
-    const top = f.candidatos?.[0];
-    if (esConfiable(top)) {
-      const presKeys = Object.keys(top!.presentaciones ?? {});
-      return nuevaLinea({
-        texto: f.texto, producto_id: top!.producto_id, label: top!.nombre,
-        presentaciones: presKeys, presentacion: matchPresentacion(f.presentacion, top),
-        cantidad: f.cantidad || "1", ...meta, ...precioOver,
-      });
-    }
-    return nuevaLinea({
-      texto: f.texto, cantidad: f.cantidad || "1",
-      presentacion: f.presentacion || "PIEZA", ...meta, ...precioOver,
-    });
-  }
-
   function cerrarPaste() {
     setPasteOpen(false);
     setPasteText("");
@@ -524,22 +378,12 @@ export default function RemisionesPage() {
     }
   }
 
-  // Deriva la unidad base del alta rápida desde la presentación pegada
-  // ('KILOGRAMO' → 'KILO', 'PZA' → 'PIEZA').
-  function unidadBaseDesde(pres?: string): string {
-    const p = norm(pres ?? "");
-    if (!p) return "KILO";
-    const hit = ["KILO", "PIEZA", "LITRO", "CAJA", "BULTO", "COSTAL", "MANOJO", "BOLSA"]
-      .find((u) => { const n = norm(u); return p.startsWith(n) || n.startsWith(p) || p.includes(n); });
-    return hit ?? "KILO";
-  }
-
   // Cambia el producto de una línea desde el selector Match IA (columna nueva).
   // "Crear nuevo" abre el popup de alta de producto precargado con el texto pegado.
   function resolverMatchIA(key: string, sel: string) {
     const l = lineas.find((x) => x.key === key);
     if (!l) return;
-    if (sel === NUEVO) {
+    if (sel === NUEVO_PRODUCTO) {
       setLinea(key, { producto_id: "", label: "", presentaciones: [], presentacion: l.presPegada || l.presentacion, importe: 0 });
       setCrearParaKey(key);   // abre el popup para crear el producto en el catálogo
       return;

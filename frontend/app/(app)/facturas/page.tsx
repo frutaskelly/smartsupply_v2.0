@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { Download, Eye, FileCode2, Mail, Plus, Stamp, Trash2, X } from "lucide-react";
+import { Download, Eye, FileCode2, FileText, Mail, Plus, Stamp, Trash2, X } from "lucide-react";
 
+import { FacturaDirectaForm } from "@/components/FacturaDirectaForm";
 import { Alert } from "@/components/ui/Alert";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -62,6 +63,10 @@ export default function FacturasPage() {
 
   const { data, loading, error, reload } = useResource<Page<Factura>>("/api/v1/facturas?limit=50");
   const rows = data?.items ?? [];
+
+  // Alta de factura directa (captura a mano, sin remisión): ocupa la pantalla
+  // completa como el alta de remisión, en vez de un modal.
+  const [mode, setMode] = useState<"list" | "create">("list");
 
   // ── generar desde remisiones ──
   const [genOpen, setGenOpen] = useState(false);
@@ -298,12 +303,28 @@ export default function FacturasPage() {
       onClick: (f) => setToDescartar(f), hidden: (f) => !(canWrite && f.estado === "BORRADOR") },
   ];
 
+  // ───────────────────────── render ─────────────────────────
+  if (mode === "create") {
+    return (
+      <FacturaDirectaForm
+        ambiente={ambiente}
+        onClose={() => setMode("list")}
+        onSaved={reload}
+      />
+    );
+  }
+
   return (
     <div>
       <PageHeader
         title="Facturas"
         subtitle={ambiente === "producción" ? "CFDI 4.0 — timbrado en producción" : "CFDI 4.0 — timbrado en modo sandbox (pruebas)"}
-        actions={canWrite ? <Button onClick={openGen}><Plus size={16} /> Generar desde remisiones</Button> : undefined}
+        actions={canWrite ? (
+          <>
+            <Button variant="secondary" onClick={openGen}><FileText size={16} /> Generar desde remisiones</Button>
+            <Button onClick={() => setMode("create")}><Plus size={16} /> Nueva factura</Button>
+          </>
+        ) : undefined}
       />
 
       <DataTableSmart
